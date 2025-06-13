@@ -1,0 +1,19 @@
+project_name: relay-server
+
+builds:
+    - main: ./cmd/server/main.go
+      goos:
+          - linux
+          - windows
+      goarch:
+          - amd64
+      ldflags: -s -w
+
+archives:
+    - format: zip
+      name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+release:
+    github:
+        owner: ${{ github.repository_owner }}
+        name: ${{ github.event.repository.name }}
