@@ -83,14 +83,22 @@ func GetChannelsHandler(w http.ResponseWriter, r *http.Request) {
                 voiceParticipants := voice.GetVoiceParticipants(ch.ID)
                 participants = make([]VoiceParticipantResponse, 0, len(voiceParticipants))
                 for _, vp := range voiceParticipants {
+                    profileURL := ""
+                    user.Mu.RLock()
+                    if userObj, exists := user.Users[vp.UserID]; exists && userObj.ProfilePictureHash != "" {
+                        profileURL = util.GetProfilePictureURL(r, vp.UserID)
+                    }
+                    user.Mu.RUnlock()
+
                     participants = append(participants, VoiceParticipantResponse{
-                        UserID:     vp.UserID,
-                        Username:   vp.Username,
-                        Nickname:   vp.Nickname,
-                        IsMuted:    vp.IsMuted,
-                        IsDeafened: vp.IsDeafened,
-                        IsSpeaking: vp.IsSpeaking,
-                        JoinedAt:   vp.JoinedAt,
+                        UserID:            vp.UserID,
+                        Username:          vp.Username,
+                        Nickname:          vp.Nickname,
+                        IsMuted:           vp.IsMuted,
+                        IsDeafened:        vp.IsDeafened,
+                        IsSpeaking:        vp.IsSpeaking,
+                        JoinedAt:          vp.JoinedAt,
+                        ProfilePictureURL: profileURL,
                     })
                 }
             } else {

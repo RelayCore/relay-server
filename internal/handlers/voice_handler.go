@@ -10,6 +10,7 @@ import (
 	"relay-server/internal/channel"
 	"relay-server/internal/db"
 	"relay-server/internal/user"
+	"relay-server/internal/util"
 	"relay-server/internal/voice"
 )
 
@@ -45,6 +46,7 @@ type VoiceParticipantResponse struct {
 	IsDeafened bool      `json:"is_deafened"`
 	IsSpeaking bool      `json:"is_speaking"`
 	JoinedAt   time.Time `json:"joined_at"`
+	ProfilePictureURL string `json:"profile_picture_url"`
 }
 
 func JoinVoiceHandler(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +79,7 @@ func JoinVoiceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Join voice room
-	if err := voice.JoinVoiceRoom(userID, req.ChannelID); err != nil {
+	if err := voice.JoinVoiceRoom(r, userID, req.ChannelID); err != nil {
 		http.Error(w, "Failed to join voice room", http.StatusInternalServerError)
 		return
 	}
@@ -187,16 +189,62 @@ func GetVoiceParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 
 	participants := voice.GetVoiceParticipants(uint(channelID))
 
+	// Convert to response format with profile picture URLs
+	participantResponses := make([]VoiceParticipantResponse, 0, len(participants))
+	for _, participant := range participants {
+		profileURL := ""
+		user.Mu.RLock()
+		if userObj, exists := user.Users[participant.UserID]; exists && userObj.ProfilePictureHash != "" {
+			profileURL = util.GetProfilePictureURL(r, participant.UserID)
+		}
+		user.Mu.RUnlock()
+
+		participantResponses = append(participantResponses, VoiceParticipantResponse{
+			UserID:            participant.UserID,
+			Username:          participant.Username,
+			Nickname:          participant.Nickname,
+			IsMuted:           participant.IsMuted,
+			IsDeafened:        participant.IsDeafened,
+			IsSpeaking:        participant.IsSpeaking,
+			JoinedAt:          participant.JoinedAt,
+			ProfilePictureURL: profileURL,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"participants": participants,
-		"count":        len(participants),
+		"participants": participantResponses,
+		"count":        len(participantResponses),
 	})
 }
 
 // GetVoiceRoomsHandler returns all active voice rooms (only for voice channels)
 func GetVoiceRoomsHandler(w http.ResponseWriter, r *http.Request) {
-	roomResponses := voice.GetAllVoiceRooms()
+	roomData := voice.GetAllVoiceRooms()
+
+	// Convert to response format with profile picture URLs
+	roomResponses := make([]map[string]interface{}, 0, len(roomData))
+	for _, room := range roomData {
+		participants, ok := room["participants"].([]map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Add profile picture URLs to participants
+		for i, participant := range participants {
+			if userID, ok := participant["user_id"].(string); ok {
+				profileURL := ""
+				user.Mu.RLock()
+				if userObj, exists := user.Users[userID]; exists && userObj.ProfilePictureHash != "" {
+					profileURL = util.GetProfilePictureURL(r, userID)
+				}
+				user.Mu.RUnlock()
+				participants[i]["profile_picture_url"] = profileURL
+			}
+		}
+
+		roomResponses = append(roomResponses, room)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -238,7 +286,7 @@ func JoinVoiceRoomHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Join voice room
-	if err := voice.JoinVoiceRoom(userID, req.ChannelID); err != nil {
+	if err := voice.JoinVoiceRoom(r, userID, req.ChannelID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -258,14 +306,22 @@ func JoinVoiceRoomHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profileURL := ""
+	user.Mu.RLock()
+	if userObj, exists := user.Users[participant.UserID]; exists && userObj.ProfilePictureHash != "" {
+		profileURL = util.GetProfilePictureURL(r, participant.UserID)
+	}
+	user.Mu.RUnlock()
+
 	response := VoiceParticipantResponse{
-		UserID:     participant.UserID,
-		Username:   participant.Username,
-		Nickname:   participant.Nickname,
-		IsMuted:    participant.IsMuted,
-		IsDeafened: participant.IsDeafened,
-		IsSpeaking: participant.IsSpeaking,
-		JoinedAt:   participant.JoinedAt,
+		UserID:            participant.UserID,
+		Username:          participant.Username,
+		Nickname:          participant.Nickname,
+		IsMuted:           participant.IsMuted,
+		IsDeafened:        participant.IsDeafened,
+		IsSpeaking:        participant.IsSpeaking,
+		JoinedAt:          participant.JoinedAt,
+		ProfilePictureURL: profileURL,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

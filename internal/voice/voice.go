@@ -3,12 +3,14 @@ package voice
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
 	"relay-server/internal/channel"
 	"relay-server/internal/db"
 	"relay-server/internal/user"
+	"relay-server/internal/util"
 )
 
 // MessageBroadcaster interface to avoid import cycle
@@ -24,6 +26,7 @@ type VoiceParticipant struct {
     IsDeafened bool      `json:"is_deafened"`
     IsSpeaking bool      `json:"is_speaking"`
     JoinedAt   time.Time `json:"joined_at"`
+    ProfilePictureURL string `json:"profile_picture_url"`
 }
 
 type VoiceRoom struct {
@@ -64,7 +67,7 @@ func init() {
     go processVoiceData()
 }
 
-func JoinVoiceRoom(userID string, channelID uint) error {
+func JoinVoiceRoom(r *http.Request, userID string, channelID uint) error {
     voiceRoomsMu.Lock()
     defer voiceRoomsMu.Unlock()
 
@@ -104,6 +107,11 @@ func JoinVoiceRoom(userID string, channelID uint) error {
         return fmt.Errorf("user already in voice room")
     }
 
+    profileURL := ""
+    if userObj, exists := user.Users[userID]; exists && userObj.ProfilePictureHash != "" {
+        profileURL = util.GetProfilePictureURL(r, userID)
+    }
+
     // Add participant
     room.Participants[userID] = &VoiceParticipant{
         UserID:     userID,
@@ -113,6 +121,7 @@ func JoinVoiceRoom(userID string, channelID uint) error {
         IsDeafened: false,
         IsSpeaking: false,
         JoinedAt:   time.Now(),
+        ProfilePictureURL: profileURL,
     }
     room.mu.Unlock()
 
