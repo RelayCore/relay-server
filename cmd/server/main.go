@@ -127,6 +127,7 @@ func main() {
     authRoute(mux, "/messages/pin", middleware.GlobalRateLimit, NoCache, handlers.PinMessageHandler)
     authRoute(mux, "/messages/unpin", middleware.GlobalRateLimit, NoCache, handlers.UnpinMessageHandler)
     authRoute(mux, "/messages/pinned", middleware.GlobalRateLimit, Cache1Min, handlers.GetPinnedMessagesHandler)
+    authRoute(mux, "/messages/search", middleware.GlobalRateLimit, Cache5Min, handlers.SearchMessagesHandler)
 
     // Invite management endpoints
     permissionRoute(mux, "/create-invite", middleware.InviteRateLimit, user.PermissionCreateInvites, NoCache, handlers.CreateInviteHandler)

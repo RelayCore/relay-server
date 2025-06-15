@@ -761,6 +761,217 @@ func GetPinnedMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SearchMessagesHandler searches for messages across channels the user has access to
+func SearchMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("user_id").(string)
+	if userID == "" {
+		http.Error(w, "User ID required", http.StatusUnauthorized)
+		return
+	}
+
+	// Get search parameters
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "Search query is required", http.StatusBadRequest)
+		return
+	}
+
+	// Optional channel filter
+	channelIDStr := r.URL.Query().Get("channel_id")
+	var channelID *uint
+	if channelIDStr != "" {
+		if parsed, err := strconv.ParseUint(channelIDStr, 10, 32); err == nil {
+			id := uint(parsed)
+			channelID = &id
+		}
+	}
+
+	// Optional author filter
+	authorID := r.URL.Query().Get("author_id")
+
+	// Get limit from query params (default to 20, max 100)
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			if parsedLimit > 100 {
+				limit = 100
+			} else {
+				limit = parsedLimit
+			}
+		}
+	}
+
+	// Get offset from query params (default to 0)
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	// Get channels user has access to
+	var accessibleChannels []uint
+	var channels []channel.Channel
+	if err := db.DB.Find(&channels).Error; err != nil {
+		http.Error(w, "Failed to fetch channels", http.StatusInternalServerError)
+		return
+	}
+
+	for _, ch := range channels {
+		if channel.CanUserAccessChannel(userID, ch.ID) {
+			// Only include text channels in search
+			if ch.Type == channel.ChannelTypeText {
+				accessibleChannels = append(accessibleChannels, ch.ID)
+			}
+		}
+	}
+
+	if len(accessibleChannels) == 0 {
+		// User has no access to any text channels
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"messages": []MessageResponse{},
+			"count":    0,
+		})
+		return
+	}
+
+	// Build search query
+	searchQuery := db.DB.Preload("Attachments").
+		Where("channel_id IN ?", accessibleChannels).
+		Where("content ILIKE ?", "%"+query+"%")
+
+	// Apply optional filters
+	if channelID != nil {
+		// Check if user has access to the specific channel
+		if !channel.CanUserAccessChannel(userID, *channelID) {
+			http.Error(w, "No access to specified channel", http.StatusForbidden)
+			return
+		}
+		searchQuery = searchQuery.Where("channel_id = ?", *channelID)
+	}
+
+	if authorID != "" {
+		searchQuery = searchQuery.Where("author_id = ?", authorID)
+	}
+
+	var messages []channel.Message
+	if err := searchQuery.Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&messages).Error; err != nil {
+		http.Error(w, "Failed to search messages", http.StatusInternalServerError)
+		return
+	}
+
+	// Get pinned message IDs for relevant channels
+	var pinnedMessageIDs []uint
+	if len(messages) > 0 {
+		channelIDs := make([]uint, 0)
+		for _, msg := range messages {
+			channelIDs = append(channelIDs, msg.ChannelID)
+		}
+		db.DB.Table("channel_pins").Where("channel_id IN ?", channelIDs).Pluck("message_id", &pinnedMessageIDs)
+	}
+
+	// Create a map for quick lookup of pinned messages
+	pinnedMap := make(map[uint]bool)
+	for _, id := range pinnedMessageIDs {
+		pinnedMap[id] = true
+	}
+
+	// Get channel names for context
+	channelNames := make(map[uint]string)
+	for _, ch := range channels {
+		channelNames[ch.ID] = ch.Name
+	}
+
+	// Convert messages to response format
+	messageResponses := make([]MessageSearchResponse, 0)
+	for _, msg := range messages {
+		// Get user information
+		user.Mu.RLock()
+		userObj, exists := user.Users[msg.AuthorID]
+		user.Mu.RUnlock()
+
+		var username, nickname string
+		if exists {
+			username = userObj.Username
+			nickname = userObj.Nickname
+		}
+
+		// Convert attachments
+		attachmentResponses := make([]AttachmentResponse, 0)
+		for _, att := range msg.Attachments {
+			filePath := att.FilePath
+			if filePath != "" && filePath[0] == '/' {
+				filePath = util.GetFullURL(r, filePath)
+			} else if filePath != "" {
+				filePath = util.GetFullURL(r, filePath)
+			}
+
+			var thumbnailPath *string
+			if att.ThumbnailPath != nil {
+				path := *att.ThumbnailPath
+				if path != "" && path[0] == '/' {
+					path = util.GetFullURL(r, path)
+				} else if path != "" {
+					path = util.GetFullURL(r, path)
+				}
+				thumbnailPath = &path
+			}
+
+			attachmentResponses = append(attachmentResponses, AttachmentResponse{
+				ID:            att.ID,
+				Type:          att.Type,
+				FileName:      att.FileName,
+				FileSize:      att.FileSize,
+				FilePath:      filePath,
+				MimeType:      att.MimeType,
+				ThumbnailPath: thumbnailPath,
+			})
+		}
+
+		messageResponses = append(messageResponses, MessageSearchResponse{
+			ID:          msg.ID,
+			ChannelID:   msg.ChannelID,
+			ChannelName: channelNames[msg.ChannelID],
+			AuthorID:    msg.AuthorID,
+			Content:     msg.Content,
+			CreatedAt:   msg.CreatedAt,
+			UpdatedAt:   msg.UpdatedAt,
+			Username:    username,
+			NickName:    nickname,
+			Attachments: attachmentResponses,
+			Pinned:      pinnedMap[msg.ID],
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"messages": messageResponses,
+		"count":    len(messageResponses),
+		"query":    query,
+	})
+}
+
+// MessageSearchResponse represents a message search result with channel context
+type MessageSearchResponse struct {
+	ID          uint                 `json:"id"`
+	ChannelID   uint                 `json:"channel_id"`
+	ChannelName string               `json:"channel_name"`
+	AuthorID    string               `json:"author_id"`
+	Content     string               `json:"content"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+	Username    string               `json:"username,omitempty"`
+	NickName    string               `json:"nickname,omitempty"`
+	Attachments []AttachmentResponse `json:"attachments,omitempty"`
+	Pinned      bool                 `json:"pinned"`
+}
+
 // getAttachmentType determines the attachment type from MIME type
 func getAttachmentType(mimeType string) channel.AttachmentType {
 	switch {
