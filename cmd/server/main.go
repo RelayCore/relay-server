@@ -117,7 +117,7 @@ func main() {
     authRoute(mux, "/voice/join", middleware.GlobalRateLimit, NoCache, handlers.JoinVoiceHandler)
     authRoute(mux, "/voice/leave", middleware.GlobalRateLimit, NoCache, handlers.LeaveVoiceHandler)
     authRoute(mux, "/voice/state", middleware.GlobalRateLimit, NoCache, handlers.UpdateVoiceStateHandler)
-    authRoute(mux, "/voice/participants", middleware.GlobalRateLimit, Cache30Sec, handlers.GetVoiceParticipantsHandler)
+    authRoute(mux, "/voice/participants", middleware.GlobalRateLimit, NoCache, handlers.GetVoiceParticipantsHandler)
     authRoute(mux, "/voice/rooms", middleware.GlobalRateLimit, Cache1Min, handlers.GetVoiceRoomsHandler)
 
     // Message endpoints with specific message rate limiting
