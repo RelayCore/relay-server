@@ -1,20 +1,29 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"relay-server/internal/user"
+	"relay-server/internal/util"
 	"relay-server/internal/websocket"
 )
 
 // UserResponse represents a user with populated role information
 type UserResponse struct {
-	ID        string      `json:"id"`
-	Username  string      `json:"username"`
-	Nickname  string      `json:"nickname"`
-	Roles     []*user.Role `json:"roles"`
-	IsOnline  bool        `json:"is_online"`
+	ID                string      `json:"id"`
+	Username          string      `json:"username"`
+	Nickname          string      `json:"nickname"`
+	Roles             []*user.Role `json:"roles"`
+	IsOnline          bool        `json:"is_online"`
+	ProfilePictureURL string      `json:"profile_picture_url"`
 }
 
 // GetUsersHandler returns all users with their roles and online status
@@ -24,12 +33,18 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 	users := make([]UserResponse, 0, len(user.Users))
 	for _, u := range user.Users {
+		profileURL := ""
+		if u.ProfilePictureHash != "" {
+			profileURL = util.GetProfilePictureURL(r, u.ID)
+		}
+
 		userResp := UserResponse{
-			ID:       u.ID,
-			Username: u.Username,
-			Nickname: u.Nickname,
-			Roles:    u.GetRoles(),
-			IsOnline: websocket.GlobalHub.IsUserOnline(u.ID),
+			ID:                u.ID,
+			Username:          u.Username,
+			Nickname:          u.Nickname,
+			Roles:             u.GetRoles(),
+			IsOnline:          websocket.GlobalHub.IsUserOnline(u.ID),
+			ProfilePictureURL: profileURL,
 		}
 		users = append(users, userResp)
 	}
@@ -58,12 +73,18 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profileURL := ""
+	if u.ProfilePictureHash != "" {
+		profileURL = util.GetProfilePictureURL(r, u.ID)
+	}
+
 	userResp := UserResponse{
-		ID:       u.ID,
-		Username: u.Username,
-		Nickname: u.Nickname,
-		Roles:    u.GetRoles(),
-		IsOnline: websocket.GlobalHub.IsUserOnline(u.ID),
+		ID:                u.ID,
+		Username:          u.Username,
+		Nickname:          u.Nickname,
+		Roles:             u.GetRoles(),
+		IsOnline:          websocket.GlobalHub.IsUserOnline(u.ID),
+		ProfilePictureURL: profileURL,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -165,14 +186,125 @@ func UpdateNicknameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profileURL := ""
+	if targetUser.ProfilePictureHash != "" {
+		profileURL = util.GetProfilePictureURL(r, targetUser.ID)
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Nickname updated successfully",
 		"user": UserResponse{
-			ID:       targetUser.ID,
-			Username: targetUser.Username,
-			Nickname: targetUser.Nickname,
-			Roles:    targetUser.GetRoles(),
-			IsOnline: websocket.GlobalHub.IsUserOnline(targetUser.ID),
+			ID:                targetUser.ID,
+			Username:          targetUser.Username,
+			Nickname:          targetUser.Nickname,
+			Roles:             targetUser.GetRoles(),
+			IsOnline:          websocket.GlobalHub.IsUserOnline(targetUser.ID),
+			ProfilePictureURL: profileURL,
 		},
+	})
+}
+
+// UploadProfilePictureHandler allows users to upload their profile picture
+func UploadProfilePictureHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the requesting user from context (set by auth middleware)
+	requestingUserID := r.Context().Value("user_id").(string)
+
+	// Parse multipart form (10MB max)
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("profile_picture")
+	if err != nil {
+		http.Error(w, "No file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	contentType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		http.Error(w, "File must be an image", http.StatusBadRequest)
+		return
+	}
+
+	// Read file content for hash calculation
+	fileContent, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate hash of the file
+	hash := sha256.Sum256(fileContent)
+	hashString := hex.EncodeToString(hash[:])
+
+	user.Mu.Lock()
+	defer user.Mu.Unlock()
+
+	// Check if user exists
+	targetUser, exists := user.Users[requestingUserID]
+	if !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if the hash is the same as current profile picture
+	if targetUser.ProfilePictureHash == hashString {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Profile picture is already up to date",
+		})
+		return
+	}
+
+	// Create uploads/icons directory if it doesn't exist
+	iconsDir := filepath.Join("uploads", "icons")
+	if err := os.MkdirAll(iconsDir, 0755); err != nil {
+		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
+		return
+	}
+
+	// Determine file extension
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		// Default to .jpg if no extension
+		ext = ".jpg"
+	}
+
+	// Create file path
+	filename := fmt.Sprintf("%s%s", requestingUserID, ext)
+	filePath := filepath.Join(iconsDir, filename)
+
+	// Create/overwrite the file
+	dst, err := os.Create(filePath)
+	if err != nil {
+		http.Error(w, "Failed to create file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	// Write file content
+	if _, err := dst.Write(fileContent); err != nil {
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+
+	// Update user's profile picture hash
+	targetUser.ProfilePictureHash = hashString
+
+	// Save to database
+	if err := user.SaveUserToDB(targetUser); err != nil {
+		http.Error(w, "Failed to save user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":     "Profile picture uploaded successfully",
+		"profile_url": util.GetFullURL(r, fmt.Sprintf("uploads/icons/%s", filename)),
+		"hash":        hashString,
 	})
 }

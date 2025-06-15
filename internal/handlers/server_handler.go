@@ -10,6 +10,7 @@ import (
 
 	"relay-server/internal/config"
 	"relay-server/internal/user"
+	"relay-server/internal/util"
 )
 
 // ServerMetadataResponse represents the server metadata response
@@ -32,15 +33,7 @@ func GetServerMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	// Set icon path to the full URL if icon exists, empty if not
 	iconPath := ""
 	if config.Conf.Icon != "" {
-		// Check if icon file actually exists
-		if _, err := os.Stat(config.Conf.Icon); err == nil {
-			// Build the full URL using the request's host
-			scheme := "http"
-			if r.TLS != nil {
-				scheme = "https"
-			}
-			iconPath = fmt.Sprintf("%s://%s/icon", scheme, r.Host)
-		}
+		iconPath = util.GetFullURL(r, config.Conf.Icon)
 	}
 
 	currentUsers := getCurrentUserCount()

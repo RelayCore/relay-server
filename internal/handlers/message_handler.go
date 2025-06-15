@@ -18,6 +18,7 @@ import (
 	"relay-server/internal/config"
 	"relay-server/internal/db"
 	"relay-server/internal/user"
+	"relay-server/internal/util"
 	"relay-server/internal/websocket"
 )
 
@@ -692,13 +693,6 @@ func GetPinnedMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get server URL from request
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	serverURL := scheme + "://" + r.Host
-
 	// Convert pinned messages to response format
 	messageResponses := make([]MessageResponse, 0)
 	for _, msg := range ch.Pinned {
@@ -719,18 +713,18 @@ func GetPinnedMessagesHandler(w http.ResponseWriter, r *http.Request) {
 			// Add server URL to file paths
 			filePath := att.FilePath
 			if filePath != "" && filePath[0] == '/' {
-				filePath = serverURL + filePath
+				filePath = util.GetFullURL(r, filePath)
 			} else if filePath != "" {
-				filePath = serverURL + "/" + filePath
+				filePath = util.GetFullURL(r, filePath)
 			}
 
 			var thumbnailPath *string
 			if att.ThumbnailPath != nil {
 				path := *att.ThumbnailPath
 				if path != "" && path[0] == '/' {
-					path = serverURL + path
+					path = util.GetFullURL(r, path)
 				} else if path != "" {
-					path = serverURL + "/" + path
+					path = util.GetFullURL(r, path)
 				}
 				thumbnailPath = &path
 			}
