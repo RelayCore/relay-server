@@ -36,9 +36,11 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-    Conn   *websocket.Conn
-    UserID string
-    Send   chan []byte
+    Conn     *websocket.Conn
+    UserID   string
+    Send     chan []byte
+    Connected bool
+    mu        sync.RWMutex
 }
 
 type Hub struct {
@@ -47,7 +49,7 @@ type Hub struct {
     register   chan *Client
     unregister chan *Client
     mu         sync.RWMutex
-    // Add callback for voice data processing
+    userClients map[string]*Client
     VoiceDataHandler func(userID string, channelID uint, audioData []byte) error
 }
 
@@ -77,10 +79,11 @@ type UserStatusData struct {
 }
 
 var GlobalHub = &Hub{
-    clients:    make(map[*Client]bool),
-    broadcast:  make(chan []byte),
-    register:   make(chan *Client),
-    unregister: make(chan *Client),
+    clients:     make(map[*Client]bool),
+    userClients: make(map[string]*Client),
+    broadcast:   make(chan []byte),
+    register:    make(chan *Client),
+    unregister:  make(chan *Client),
 }
 
 // SetVoiceDataHandler sets the callback for processing voice data
@@ -96,7 +99,24 @@ func (h *Hub) Run() {
         select {
         case client := <-h.register:
             h.mu.Lock()
+
+            // Check if user already has a connection
+            if existingClient, exists := h.userClients[client.UserID]; exists {
+                log.Printf("User %s already connected, closing existing connection", client.UserID)
+                // Clean up existing connection
+                if _, ok := h.clients[existingClient]; ok {
+                    delete(h.clients, existingClient)
+                    close(existingClient.Send)
+                    existingClient.Conn.Close()
+                }
+            }
+
             h.clients[client] = true
+            h.userClients[client.UserID] = client
+            client.mu.Lock()
+            client.Connected = true
+            client.mu.Unlock()
+
             h.mu.Unlock()
             log.Printf("User %s connected", client.UserID)
 
@@ -104,27 +124,45 @@ func (h *Hub) Run() {
             h.mu.Lock()
             if _, ok := h.clients[client]; ok {
                 delete(h.clients, client)
+                delete(h.userClients, client.UserID)
                 close(client.Send)
+
+                client.mu.Lock()
+                client.Connected = false
+                client.mu.Unlock()
             }
             h.mu.Unlock()
-            log.Printf("User %s disconnected and removed from voice rooms", client.UserID)
-            voice.DisconnectUserFromAllVoiceRooms(client.UserID)
-            h.BroadcastMessage("user_status", UserStatusData{
-                UserID: client.UserID,
-                Status: "offline",
-            })
+
+            log.Printf("User %s disconnected, cleaning up voice rooms", client.UserID)
+
+            // Use goroutine to prevent blocking the hub
+            go func(userID string) {
+                voice.DisconnectUserFromAllVoiceRooms(userID)
+                h.BroadcastMessage("user_status", UserStatusData{
+                    UserID: userID,
+                    Status: "offline",
+                })
+            }(client.UserID)
 
         case message := <-h.broadcast:
             h.mu.RLock()
+            clients := make([]*Client, 0, len(h.clients))
             for client := range h.clients {
+                clients = append(clients, client)
+            }
+            h.mu.RUnlock()
+
+            // Send messages outside of the lock to prevent blocking
+            for _, client := range clients {
                 select {
                 case client.Send <- message:
                 default:
-                    close(client.Send)
-                    delete(h.clients, client)
+                    // Client is blocked, unregister it
+                    go func(c *Client) {
+                        h.unregister <- c
+                    }(client)
                 }
             }
-            h.mu.RUnlock()
 
         case <-onlineUsersTicker.C:
             h.broadcastOnlineUsers()
@@ -218,11 +256,15 @@ func (h *Hub) BroadcastMessageWithUserInfo(messageType string, messageData inter
 
 func (c *Client) readPump() {
     defer func() {
-        // Clean up voice room participation before unregistering
-        voice.DisconnectUserFromAllVoiceRooms(c.UserID)
+        // Ensure proper cleanup order
+        c.mu.Lock()
+        c.Connected = false
+        c.mu.Unlock()
+
         GlobalHub.unregister <- c
         c.Conn.Close()
     }()
+
     c.Conn.SetReadLimit(maxMessageSize)
     c.Conn.SetReadDeadline(time.Now().Add(pongWait))
     c.Conn.SetPongHandler(func(string) error {
@@ -231,10 +273,18 @@ func (c *Client) readPump() {
     })
 
     for {
+        // Check if client is still connected
+        c.mu.RLock()
+        if !c.Connected {
+            c.mu.RUnlock()
+            break
+        }
+        c.mu.RUnlock()
+
         messageType, message, err := c.Conn.ReadMessage()
         if err != nil {
             if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-                log.Printf("WebSocket error: %v", err)
+                log.Printf("WebSocket error for user %s: %v", c.UserID, err)
             }
             break
         }
@@ -242,22 +292,20 @@ func (c *Client) readPump() {
         if messageType == websocket.BinaryMessage {
             // Handle voice data using callback
             if len(message) >= 8 && GlobalHub.VoiceDataHandler != nil {
-                // First 4 bytes: channel ID, next 4 bytes: data length
                 channelID := binary.LittleEndian.Uint32(message[:4])
                 dataLength := binary.LittleEndian.Uint32(message[4:8])
 
                 if len(message) >= int(8+dataLength) {
                     audioData := message[8:8+dataLength]
                     if err := GlobalHub.VoiceDataHandler(c.UserID, uint(channelID), audioData); err != nil {
-                        log.Printf("Error processing voice data: %v", err)
+                        log.Printf("Error processing voice data from %s: %v", c.UserID, err)
                     }
                 }
             }
         } else {
-            // Handle text messages
             var msg Message
             if err := json.Unmarshal(message, &msg); err != nil {
-                log.Printf("Error unmarshaling message: %v", err)
+                log.Printf("Error unmarshaling message from %s: %v", c.UserID, err)
                 continue
             }
         }
@@ -276,19 +324,35 @@ func (c *Client) writePump() {
         case message, ok := <-c.Send:
             c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
             if !ok {
-                // The Hub closed the channel.
-                if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
-                    log.Printf("Error writing close message to %s: %v", c.UserID, err)
-                }
+                c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+                return
+            }
+
+            // Check if client is still connected before writing
+            c.mu.RLock()
+            connected := c.Connected
+            c.mu.RUnlock()
+
+            if !connected {
                 return
             }
 
             if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
-                log.Printf("Error writing text message to %s: %v", c.UserID, err)
+                log.Printf("Error writing message to %s: %v", c.UserID, err)
                 return
             }
+
         case <-ticker.C:
             c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+            c.mu.RLock()
+            connected := c.Connected
+            c.mu.RUnlock()
+
+            if !connected {
+                return
+            }
+
             if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
                 log.Printf("Error sending ping to %s: %v", c.UserID, err)
                 return
@@ -344,4 +408,20 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
         UserID: client.UserID,
         Status: "online",
     })
+}
+
+func (h *Hub) IsUserConnected(userID string) bool {
+    h.mu.RLock()
+    client, exists := h.userClients[userID]
+    h.mu.RUnlock()
+
+    if !exists {
+        return false
+    }
+
+    client.mu.RLock()
+    connected := client.Connected
+    client.mu.RUnlock()
+
+    return connected
 }

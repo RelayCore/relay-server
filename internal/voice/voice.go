@@ -440,26 +440,29 @@ func DisconnectUserFromAllVoiceRooms(userID string) {
 
     var roomsToCleanup []uint
 
-    // Find all rooms the user is in and remove them
     for channelID, room := range voiceRooms {
         room.mu.Lock()
         if _, exists := room.Participants[userID]; exists {
-            // Remove participant from room
             delete(room.Participants, userID)
+            log.Printf("User %s disconnected from voice room %d", userID, channelID)
 
-            log.Printf("User %s automatically disconnected from voice room %d", userID, channelID)
+            // Remove from audio mixer with error handling
+            if room.AudioMixer != nil {
+                room.AudioMixer.RemoveParticipant(userID)
+            }
 
-            // Remove from audio mixer
-            room.AudioMixer.RemoveParticipant(userID)
-
-            // Broadcast user left voice room
+            // Broadcast with better error handling
             if broadcaster != nil {
                 go func(cID uint, uID string) {
                     defer func() {
                         if r := recover(); r != nil {
-                            log.Printf("DisconnectUserFromAllVoiceRooms: Panic recovered during broadcast: %v", r)
+                            log.Printf("Panic in voice disconnect broadcast: %v", r)
                         }
                     }()
+
+                    // Add small delay to ensure other cleanup is complete
+                    time.Sleep(100 * time.Millisecond)
+
                     broadcaster.BroadcastMessage("user_left_voice", map[string]interface{}{
                         "user_id":    uID,
                         "channel_id": cID,
@@ -467,7 +470,6 @@ func DisconnectUserFromAllVoiceRooms(userID string) {
                 }(channelID, userID)
             }
 
-            // Mark room for cleanup if empty
             if len(room.Participants) == 0 {
                 roomsToCleanup = append(roomsToCleanup, channelID)
             }
@@ -480,10 +482,12 @@ func DisconnectUserFromAllVoiceRooms(userID string) {
         if room, exists := voiceRooms[channelID]; exists {
             room.mu.Lock()
             if len(room.Participants) == 0 {
-                room.AudioMixer.Stop()
+                if room.AudioMixer != nil {
+                    room.AudioMixer.Stop()
+                }
                 room.mu.Unlock()
                 delete(voiceRooms, channelID)
-                log.Printf("Voice room %d cleaned up due to no participants", channelID)
+                log.Printf("Voice room %d cleaned up", channelID)
             } else {
                 room.mu.Unlock()
             }
