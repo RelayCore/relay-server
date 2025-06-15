@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"chat-server/internal/config"
-	"chat-server/internal/user"
+	"relay-server/internal/config"
+	"relay-server/internal/user"
 )
 
 // ServerMetadataResponse represents the server metadata response

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"chat-server/internal/user"
+	"relay-server/internal/user"
 )
 
 func CreateInviteHandler(w http.ResponseWriter, r *http.Request) {

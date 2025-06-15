@@ -1,8 +1,8 @@
 package channel
 
 import (
-	"chat-server/internal/db"
-	"chat-server/internal/user"
+	"relay-server/internal/db"
+	"relay-server/internal/user"
 )
 
 // CanUserAccessChannel checks if a user can read a channel

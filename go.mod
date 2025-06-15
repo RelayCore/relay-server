@@ -1,4 +1,4 @@
-module chat-server
+module relay-server
 
 go 1.23.0
 

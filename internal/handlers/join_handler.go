@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"chat-server/internal/config"
-	"chat-server/internal/user"
+	"relay-server/internal/config"
+	"relay-server/internal/user"
 )
 
 func JoinRequestHandler(w http.ResponseWriter, r *http.Request) {

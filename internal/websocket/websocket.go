@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"chat-server/internal/user"
-	"chat-server/internal/voice"
+	"relay-server/internal/user"
+	"relay-server/internal/voice"
 
 	"github.com/gorilla/websocket"
 )

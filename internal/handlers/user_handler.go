@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"chat-server/internal/user"
-	"chat-server/internal/websocket"
+	"relay-server/internal/user"
+	"relay-server/internal/websocket"
 )
 
 // UserResponse represents a user with populated role information

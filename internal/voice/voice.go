@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"chat-server/internal/channel"
-	"chat-server/internal/db"
-	"chat-server/internal/user"
+	"relay-server/internal/channel"
+	"relay-server/internal/db"
+	"relay-server/internal/user"
 )
 
 // MessageBroadcaster interface to avoid import cycle

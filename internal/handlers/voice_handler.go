@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"chat-server/internal/channel"
-	"chat-server/internal/db"
-	"chat-server/internal/user"
-	"chat-server/internal/voice"
+	"relay-server/internal/channel"
+	"relay-server/internal/db"
+	"relay-server/internal/user"
+	"relay-server/internal/voice"
 )
 
 type JoinVoiceRequest struct {

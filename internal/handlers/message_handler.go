@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"chat-server/internal/channel"
-	"chat-server/internal/config"
-	"chat-server/internal/db"
-	"chat-server/internal/user"
-	"chat-server/internal/websocket"
+	"relay-server/internal/channel"
+	"relay-server/internal/config"
+	"relay-server/internal/db"
+	"relay-server/internal/user"
+	"relay-server/internal/websocket"
 )
 
 // SendMessageRequest represents the request body for sending a message

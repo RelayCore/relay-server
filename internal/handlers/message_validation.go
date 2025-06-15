@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"chat-server/internal/channel"
-	"chat-server/internal/db"
+	"relay-server/internal/channel"
+	"relay-server/internal/db"
 )
 
 // ValidateTextChannelForMessages validates that a channel exists and is a text channel for message operations

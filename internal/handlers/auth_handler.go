@@ -8,8 +8,8 @@ import (
 	"log"
 	"net/http"
 
-	"chat-server/internal/user"
 	"crypto/sha256"
+	"relay-server/internal/user"
 )
 
 func AuthChallengeHandler(w http.ResponseWriter, r *http.Request) {

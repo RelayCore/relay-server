@@ -1,9 +1,9 @@
 package user
 
 import (
-	"chat-server/internal/db"
 	"crypto/ed25519"
 	"log"
+	"relay-server/internal/db"
 	"sync"
 	"time"
 )

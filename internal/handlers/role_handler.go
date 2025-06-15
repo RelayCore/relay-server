@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"chat-server/internal/user"
+	"relay-server/internal/user"
 )
 
 // CreateRoleHandler creates a new custom role

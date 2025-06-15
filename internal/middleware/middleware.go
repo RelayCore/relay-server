@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"chat-server/internal/user"
+	"relay-server/internal/user"
 )
 
 type RateLimiter struct {

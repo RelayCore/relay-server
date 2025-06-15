@@ -1,10 +1,10 @@
 package user
 
 import (
-	"chat-server/internal/db"
 	"encoding/json"
 	"fmt"
 	"log"
+	"relay-server/internal/db"
 	"sort"
 	"sync"
 )

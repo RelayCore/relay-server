@@ -1,21 +1,21 @@
 package main
 
 import (
-	"chat-server/internal/middleware"
 	"crypto/rand"
 	"encoding/hex"
 	"log"
 	"net/http"
+	"relay-server/internal/middleware"
 	"time"
 
-	"chat-server/internal/channel"
-	"chat-server/internal/db"
-	"chat-server/internal/voice"
-	"chat-server/internal/websocket"
+	"relay-server/internal/channel"
+	"relay-server/internal/db"
+	"relay-server/internal/voice"
+	"relay-server/internal/websocket"
 
-	"chat-server/internal/config"
-	"chat-server/internal/handlers"
-	"chat-server/internal/user"
+	"relay-server/internal/config"
+	"relay-server/internal/handlers"
+	"relay-server/internal/user"
 )
 
 var (
