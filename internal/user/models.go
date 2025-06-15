@@ -59,11 +59,12 @@ func (r *RoleIDsType) Scan(value interface{}) error {
 // UserModel represents the database model for users
 type UserModel struct {
     gorm.Model
-    ID        string        `gorm:"primaryKey"`
-    Username  string        `gorm:"uniqueIndex"`
-    Nickname  string
-    PublicKey PublicKeyType
-    RoleIDs   RoleIDsType
+    ID                 string        `gorm:"primaryKey"`
+    Username           string        `gorm:"uniqueIndex"`
+    Nickname           string
+    PublicKey          PublicKeyType
+    RoleIDs            RoleIDsType
+    ProfilePictureHash string
 }
 
 // InviteModel represents the database model for invites

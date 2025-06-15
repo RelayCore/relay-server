@@ -7,11 +7,12 @@ import (
 )
 
 type User struct {
-    Username  string
-    Nickname  string
-    PublicKey ed25519.PublicKey
-    RoleIDs   []string  // Changed from Roles to RoleIDs
-    ID        string
+    Username           string
+    Nickname           string
+    PublicKey          ed25519.PublicKey
+    RoleIDs            []string  // Changed from Roles to RoleIDs
+    ID                 string
+    ProfilePictureHash string    // Hash of the profile picture
 }
 
 // GetRoles returns the actual Role objects for this user
@@ -89,11 +90,12 @@ func LoadUsersFromDB() {
 
     for _, userModel := range userModels {
         Users[userModel.ID] = &User{
-            ID:        userModel.ID,
-            Username:  userModel.Username,
-            Nickname:  userModel.Nickname,
-            PublicKey: ed25519.PublicKey(userModel.PublicKey),
-            RoleIDs:   []string(userModel.RoleIDs),
+            ID:                 userModel.ID,
+            Username:           userModel.Username,
+            Nickname:           userModel.Nickname,
+            PublicKey:          ed25519.PublicKey(userModel.PublicKey),
+            RoleIDs:            []string(userModel.RoleIDs),
+            ProfilePictureHash: userModel.ProfilePictureHash,
         }
     }
 
@@ -102,11 +104,12 @@ func LoadUsersFromDB() {
 
 func SaveUserToDB(user *User) error {
     userModel := UserModel{
-        ID:        user.ID,
-        Username:  user.Username,
-        Nickname:  user.Nickname,
-        PublicKey: PublicKeyType(user.PublicKey),
-        RoleIDs:   RoleIDsType(user.RoleIDs),
+        ID:                 user.ID,
+        Username:           user.Username,
+        Nickname:           user.Nickname,
+        PublicKey:          PublicKeyType(user.PublicKey),
+        RoleIDs:            RoleIDsType(user.RoleIDs),
+        ProfilePictureHash: user.ProfilePictureHash,
     }
 
     return db.DB.Save(&userModel).Error

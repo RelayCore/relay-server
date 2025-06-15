@@ -91,6 +91,7 @@ func main() {
     authRoute(mux, "/users", middleware.GlobalRateLimit, Cache2Min, handlers.GetUsersHandler)
     authRoute(mux, "/user", middleware.GlobalRateLimit, Cache5Min, handlers.GetUserHandler)
     authRoute(mux, "/user/nickname", middleware.GlobalRateLimit, NoCache, handlers.UpdateNicknameHandler)
+    authRoute(mux, "/user/profile-picture", middleware.GlobalRateLimit, NoCache, handlers.UploadProfilePictureHandler)
 
     // Role management endpoints
     permissionRoute(mux, "/roles", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.CreateRoleHandler)
