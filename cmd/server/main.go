@@ -131,6 +131,7 @@ func main() {
 
     // Server management endpoints
     permissionRoute(mux, "/server/icon", middleware.GlobalRateLimit, user.PermissionManageServer, Cache10Min, handlers.UploadServerIconHandler)
+    permissionRoute(mux, "/server/config", middleware.GlobalRateLimit, user.PermissionManageServer, NoCache, handlers.UpdateServerConfigHandler)
 
     // Check for first-time setup after everything is initialized
     go func() {

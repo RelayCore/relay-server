@@ -254,3 +254,90 @@ func getCurrentUserCount() int {
 	defer user.Mu.Unlock()
 	return len(user.Users)
 }
+
+type UpdateServerConfigRequest struct {
+	Name           *string `json:"name,omitempty"`
+	Description    *string `json:"description,omitempty"`
+	AllowInvite    *bool   `json:"allow_invite,omitempty"`
+	MaxUsers       *int    `json:"max_users,omitempty"`
+	MaxFileSize    *int64  `json:"max_file_size,omitempty"`    // In MB
+	MaxAttachments *int    `json:"max_attachments,omitempty"`
+}
+
+// UpdateServerConfigHandler handles server configuration updates
+func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != "PUT" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateServerConfigRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Update configuration fields if provided
+	if req.Name != nil {
+		if strings.TrimSpace(*req.Name) == "" {
+			http.Error(w, "Server name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		config.Conf.Name = strings.TrimSpace(*req.Name)
+	}
+
+	if req.Description != nil {
+		config.Conf.Description = strings.TrimSpace(*req.Description)
+	}
+
+	if req.AllowInvite != nil {
+		config.Conf.AllowInvite = *req.AllowInvite
+	}
+
+	if req.MaxUsers != nil {
+        if *req.MaxUsers < 1 {
+            http.Error(w, "Max users must be at least 1", http.StatusBadRequest)
+            return
+        }
+
+        // Check if new max users is at least the current number of users
+        currentUsers := getCurrentUserCount()
+        if *req.MaxUsers < currentUsers {
+            http.Error(w, fmt.Sprintf("Max users cannot be less than current users (%d)", currentUsers), http.StatusBadRequest)
+            return
+        }
+
+        config.Conf.MaxUsers = *req.MaxUsers
+    }
+
+	if req.MaxAttachments != nil {
+		if *req.MaxAttachments < 1 || *req.MaxAttachments > 100 {
+			http.Error(w, "Max attachments must be between 1 and 100", http.StatusBadRequest)
+			return
+		}
+		config.Conf.MaxAttachments = *req.MaxAttachments
+	}
+
+	// Save configuration to file
+	err = config.SaveConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated configuration
+	maxFileSizeMB := config.Conf.MaxFileSize / (1024 * 1024)
+	response := map[string]interface{}{
+		"message":         "Server configuration updated successfully",
+		"name":            config.Conf.Name,
+		"description":     config.Conf.Description,
+		"allow_invite":    config.Conf.AllowInvite,
+		"max_users":       config.Conf.MaxUsers,
+		"max_file_size":   maxFileSizeMB,
+		"max_attachments": config.Conf.MaxAttachments,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
