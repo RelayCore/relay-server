@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 
 	"gopkg.in/yaml.v2"
@@ -19,7 +20,38 @@ type ServerConfig struct {
 
 var Conf ServerConfig
 
+// CreateDefaultConfig creates a default configuration file
+func CreateDefaultConfig(path string) error {
+	defaultConfig := ServerConfig{
+		Name:           "Relay Server",
+		Description:    "A real-time communication server",
+		AllowInvite:    true,
+		MaxUsers:       100,
+		MaxFileSize:    50,  // 50MB
+		MaxAttachments: 10,
+		Icon:           "",
+		Port:           ":8080",
+	}
+
+	data, err := yaml.Marshal(&defaultConfig)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
+}
+
 func LoadConfig(path string) {
+	// Check if config file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		log.Printf("Config file '%s' not found, creating default configuration...", path)
+		if err := CreateDefaultConfig(path); err != nil {
+			log.Printf("Failed to create default config: %v", err)
+			panic(err)
+		}
+		log.Printf("Default configuration created at '%s'", path)
+	}
+
 	f, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
