@@ -10,7 +10,6 @@ import (
 
 	"relay-server/internal/channel"
 	"relay-server/internal/db"
-	"relay-server/internal/voice"
 	"relay-server/internal/websocket"
 
 	"relay-server/internal/config"
@@ -68,10 +67,6 @@ func main() {
     createDefaultChannelIfNeeded()
 
     go websocket.GlobalHub.Run()
-
-	// Set up voice chat integration
-    voice.SetMessageBroadcaster(websocket.GlobalHub)
-    websocket.GlobalHub.SetVoiceDataHandler(voice.ProcessAudioData)
 
     mux := http.NewServeMux()
 
