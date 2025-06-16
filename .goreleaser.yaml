@@ -1,4 +1,10 @@
+version: 2
+
 project_name: relay-server
+
+before:
+    hooks:
+        - go mod tidy
 
 builds:
     - main: ./cmd/server/main.go
@@ -7,13 +13,18 @@ builds:
           - windows
       goarch:
           - amd64
-      ldflags: -s -w
+          - arm64
+      ldflags:
+          - -s -w
+          - -X relay-server/internal/handlers.Version={{.Version}}
+          - -X relay-server/internal/handlers.BuildTime={{.Date}}
+          - -X relay-server/internal/handlers.GitCommit={{.FullCommit}}
 
 archives:
-    - format: zip
-      name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    - formats: ["zip"]
+      name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 release:
     github:
-        owner: ${{ github.repository_owner }}
-        name: ${{ github.event.repository.name }}
+        owner: "RelayCore"
+        name: "relay-server"
