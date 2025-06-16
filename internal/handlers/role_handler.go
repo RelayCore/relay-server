@@ -35,7 +35,10 @@ func CreateRoleHandler(w http.ResponseWriter, r *http.Request) {
     if req.Rank == 0 {
         req.Rank = 100
     }
-    req.Assignable = true // Custom roles are assignable by default
+    req.Assignable = true
+    if !req.DisplayRoleMembers {
+        req.DisplayRoleMembers = true
+    }
 
     if err := user.Roles.CreateRole(&req); err != nil {
         http.Error(w, "Failed to create role", http.StatusInternalServerError)
@@ -47,11 +50,12 @@ func CreateRoleHandler(w http.ResponseWriter, r *http.Request) {
 
 func UpdateRoleHandler(w http.ResponseWriter, r *http.Request) {
     var req struct {
-        ID          string             `json:"id"`
-        Name        string             `json:"name"`
-        Color       string             `json:"color"`
-        Rank        int                `json:"rank"`
-        Permissions []user.Permission  `json:"permissions"`
+        ID                 string             `json:"id"`
+        Name               string             `json:"name"`
+        Color              string             `json:"color"`
+        Rank               int                `json:"rank"`
+        Permissions        []user.Permission  `json:"permissions"`
+        DisplayRoleMembers *bool              `json:"display_role_members,omitempty"`
     }
 
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -106,6 +110,12 @@ func UpdateRoleHandler(w http.ResponseWriter, r *http.Request) {
         updatedRole.Permissions = req.Permissions
     } else {
         updatedRole.Permissions = existingRole.Permissions
+    }
+
+    if req.DisplayRoleMembers != nil {
+        updatedRole.DisplayRoleMembers = *req.DisplayRoleMembers
+    } else {
+        updatedRole.DisplayRoleMembers = existingRole.DisplayRoleMembers
     }
 
     // Update the role

@@ -39,12 +39,13 @@ const (
 )
 
 type Role struct {
-    ID          string       `json:"id"`
-    Name        string       `json:"name"`
-    Color       string       `json:"color"`       // Hex color code (e.g., "#FF5733")
-    Rank        int          `json:"rank"`        // Higher rank = more authority
-    Permissions []Permission `json:"permissions"`
-    Assignable  bool         `json:"assignable"`  // Can this role be assigned by users with manage_roles permission
+    ID                 string       `json:"id"`
+    Name               string       `json:"name"`
+    Color              string       `json:"color"`       // Hex color code (e.g., "#FF5733")
+    Rank               int          `json:"rank"`        // Higher rank = more authority
+    Permissions        []Permission `json:"permissions"`
+    Assignable         bool         `json:"assignable"`  // Can this role be assigned by users with manage_roles permission
+    DisplayRoleMembers bool         `json:"display_role_members"` // Whether this role should be displayed in members sidebar
 }
 
 // RoleManager handles role operations
@@ -75,7 +76,8 @@ func (rm *RoleManager) InitializeDefaultRoles() {
             PermissionManageServer, PermissionManageRoles, PermissionViewAuditLog,
             PermissionJoinVoice, PermissionSpeakInVoice, PermissionManageVoice,
         },
-        Assignable: false, // Only manually assignable
+        Assignable:         false, // Only manually assignable
+        DisplayRoleMembers: true,  // Display owner role in members sidebar
     }
 }
 
@@ -133,12 +135,13 @@ func (rm *RoleManager) LoadRolesFromDB() {
         }
 
         rm.roles[roleModel.ID] = &Role{
-            ID:          roleModel.ID,
-            Name:        roleModel.Name,
-            Color:       roleModel.Color,
-            Rank:        roleModel.Rank,
-            Permissions: permissions,
-            Assignable:  roleModel.Assignable,
+            ID:                 roleModel.ID,
+            Name:               roleModel.Name,
+            Color:              roleModel.Color,
+            Rank:               roleModel.Rank,
+            Permissions:        permissions,
+            Assignable:         roleModel.Assignable,
+            DisplayRoleMembers: roleModel.DisplayRoleMembers,
         }
     }
 
@@ -153,12 +156,13 @@ func (rm *RoleManager) SaveRoleToDB(role *Role) error {
     }
 
     roleModel := RoleModel{
-        ID:          role.ID,
-        Name:        role.Name,
-        Color:       role.Color,
-        Rank:        role.Rank,
-        Permissions: string(permissionsJSON),
-        Assignable:  role.Assignable,
+        ID:                 role.ID,
+        Name:               role.Name,
+        Color:              role.Color,
+        Rank:               role.Rank,
+        Permissions:        string(permissionsJSON),
+        Assignable:         role.Assignable,
+        DisplayRoleMembers: role.DisplayRoleMembers,
     }
 
     return db.DB.Save(&roleModel).Error

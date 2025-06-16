@@ -87,4 +87,5 @@ type RoleModel struct {
     Rank        int
     Permissions string // JSON string of permissions
     Assignable  bool
+    DisplayRoleMembers bool `gorm:"default:true"`
 }
