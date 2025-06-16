@@ -841,7 +841,7 @@ func SearchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	// Build search query
 	searchQuery := db.DB.Preload("Attachments").
 		Where("channel_id IN ?", accessibleChannels).
-		Where("content ILIKE ?", "%"+query+"%")
+		Where("LOWER(content) LIKE ?", "%"+strings.ToLower(query)+"%")
 
 	// Apply optional filters
 	if channelID != nil {
