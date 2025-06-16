@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log"
+	"net"
 	"net/http"
 	"relay-server/internal/middleware"
+	"strings"
 	"time"
 
 	"relay-server/internal/channel"
@@ -148,7 +150,7 @@ func main() {
         }
     }()
 
-    log.Println("Server running on", config.Conf.Port)
+    logServerConnectionInfo()
     log.Fatal(http.ListenAndServe(config.Conf.Port, middleware.CORS(mux)))
 }
 
@@ -188,6 +190,39 @@ func createDefaultChannelIfNeeded() {
     }
 }
 
+func logServerConnectionInfo() {
+    port := strings.TrimPrefix(config.Conf.Port, ":")
+    if port == "" {
+        port = "8080" // default fallback
+    }
+
+    log.Printf("═══════════════════════════════════════════════════════════════")
+    log.Printf("  SERVER CONNECTION INFORMATION")
+    log.Printf("───────────────────────────────────────────────────────────────")
+
+    // Local connections
+    log.Printf("Local connections:")
+    log.Printf("   • http://localhost:%s", port)
+    log.Printf("   • http://127.0.0.1:%s", port)
+
+    // Network interfaces
+    log.Printf("Network connections:")
+    addrs, err := net.InterfaceAddrs()
+    if err != nil {
+        log.Printf("   ⚠️  Could not determine network addresses: %v", err)
+    } else {
+        for _, addr := range addrs {
+            if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+                if ipnet.IP.To4() != nil { // IPv4
+                    log.Printf("   • http://%s:%s", ipnet.IP.String(), port)
+                }
+            }
+        }
+    }
+
+    log.Printf("═══════════════════════════════════════════════════════════════")
+}
+
 func createFirstTimeInvite() {
     // Generate temporary invite code for server owner
     codeBytes := make([]byte, 16)
@@ -212,17 +247,17 @@ func createFirstTimeInvite() {
     user.Invites[tempInviteCode] = tempInvite
     user.Mu.Unlock()
 
-    log.Printf("═══════════════════════════════════════════════════════════════")
-    log.Printf("🚀 SERVER SETUP - FIRST TIME LAUNCH DETECTED")
-    log.Printf("─────────────────────────────────────────────────────────────")
+    log.Printf("\n═══════════════════════════════════════════════════════════════")
+    log.Printf("SERVER SETUP - FIRST TIME LAUNCH DETECTED")
+    log.Printf("───────────────────────────────────────────────────────────────")
     log.Printf("No users found in the server. A temporary invite has been created")
     log.Printf("for the server owner to join and set up the server.")
     log.Printf("")
-    log.Printf("📋 TEMPORARY INVITE CODE: %s", tempInviteCode)
-    log.Printf("⏰ Expires: %s", expiry.Format("2006-01-02 15:04:05"))
-    log.Printf("🔢 Max Uses: 1 (single use only)")
+    log.Printf("  TEMPORARY INVITE CODE: %s", tempInviteCode)
+    log.Printf("  Expires: %s", expiry.Format("2006-01-02 15:04:05"))
+    log.Printf("  Max Uses: 1 (single use only)")
     log.Printf("")
-    log.Printf("⚠️  IMPORTANT:")
+    log.Printf("  IMPORTANT:")
     log.Printf("• This invite will expire in 24 hours")
     log.Printf("• It can only be used once")
     log.Printf("• The first user to join will have the 'owner' role")
