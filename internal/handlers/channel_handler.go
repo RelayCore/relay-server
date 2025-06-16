@@ -10,6 +10,7 @@ import (
 	"relay-server/internal/user"
 	"relay-server/internal/util"
 	"relay-server/internal/voice"
+	"relay-server/internal/websocket"
 
 	"gorm.io/gorm"
 )
@@ -427,6 +428,8 @@ func UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 		IsVoice:     ch.Type == channel.ChannelTypeVoice,
 		Permissions: permissionResponses,
 	}
+
+	websocket.GlobalHub.BroadcastMessage("channel_update", response)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
