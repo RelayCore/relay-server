@@ -77,6 +77,9 @@ func main() {
     publicRoute(mux, "/auth", middleware.AuthRateLimit, NoCache, handlers.AuthChallengeHandler)
     publicRoute(mux, "/server", middleware.GlobalRateLimit, Cache1Hour, handlers.GetServerMetadataHandler)
 
+    // Technical metadata endpoint
+    authRoute(mux, "/server/tech", middleware.GlobalRateLimit, Cache5Min, handlers.GetTechnicalMetadataHandler)
+
     // Static file serving for uploads
     mux.Handle("/uploads/", middleware.CacheControl(24*time.Hour, "public")(http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads/"))).ServeHTTP))
     // Server icon endpoint
