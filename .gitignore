@@ -28,3 +28,4 @@ config.yaml
 icon.*
 data/
 uploads/
+/dist
