@@ -23,7 +23,9 @@ type RateLimiter struct {
 
 func CORS(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        log.Printf("API Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+        if (r.Method != "OPTIONS") {
+            log.Printf("%s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+        }
 
         w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
