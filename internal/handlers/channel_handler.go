@@ -576,7 +576,7 @@ func UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 	updatedChannels = append(updatedChannels, mainUpdate)
 
 	// Broadcast the channel updates
-	websocket.GlobalHub.BroadcastMessage("channels_update", map[string]interface{}{
+	websocket.GlobalHub.BroadcastMessage("channel_update", map[string]interface{}{
 		"channels": updatedChannels,
 	})
 
