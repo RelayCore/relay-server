@@ -308,3 +308,45 @@ func UploadProfilePictureHandler(w http.ResponseWriter, r *http.Request) {
 		"hash":        hashString,
 	})
 }
+
+// LeaveServerHandler allows users to leave the server (delete their account)
+func LeaveServerHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the requesting user from context (set by auth middleware)
+	requestingUserID := r.Context().Value("user_id").(string)
+
+	user.Mu.Lock()
+	defer user.Mu.Unlock()
+
+	// Check if user exists
+	targetUser, exists := user.Users[requestingUserID]
+	if !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Prevent the last user with owner role from leaving
+	ownerRole, ownerExists := user.Roles.GetRole("owner")
+	if ownerExists && targetUser.HasRole(ownerRole.ID) {
+		http.Error(w, "Cannot leave server: you are the owner", http.StatusForbidden)
+		return
+	}
+
+	// Disconnect user from websocket if connected
+	websocket.GlobalHub.DisconnectUser(requestingUserID)
+
+	// Delete user from memory
+	delete(user.Users, requestingUserID)
+
+	// Delete user from database
+	if err := user.DeleteUserFromDB(requestingUserID); err != nil {
+		// Re-add user back to memory if database deletion fails
+		user.Users[requestingUserID] = targetUser
+		http.Error(w, "Failed to delete user from database", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Successfully left the server",
+	})
+}

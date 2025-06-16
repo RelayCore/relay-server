@@ -114,3 +114,7 @@ func SaveUserToDB(user *User) error {
 
     return db.DB.Save(&userModel).Error
 }
+
+func DeleteUserFromDB(userID string) error {
+    return db.DB.Delete(&UserModel{}, "id = ?", userID).Error
+}

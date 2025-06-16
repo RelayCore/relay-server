@@ -302,6 +302,35 @@ func (h *Hub) IsUserConnected(userID string) bool {
 	return connected
 }
 
+func (h *Hub) DisconnectUser(userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if client, exists := h.userClients[userID]; exists {
+		if _, ok := h.clients[client]; ok {
+			delete(h.clients, client)
+			delete(h.userClients, userID)
+
+			client.mu.Lock()
+			client.Connected = false
+			client.mu.Unlock()
+
+			// Close the client connection
+			go func() {
+				select {
+				case <-client.Send:
+					// Channel already closed
+				default:
+					close(client.Send)
+				}
+				client.Conn.Close()
+			}()
+
+			log.Printf("Forcibly disconnected user %s", userID)
+		}
+	}
+}
+
 func (c *Client) readPump() {
 	defer func() {
         c.mu.Lock()
