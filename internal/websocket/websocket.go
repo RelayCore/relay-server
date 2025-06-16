@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relay-server/internal/user"
@@ -26,12 +27,15 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+var connectionCounter int64
+
 type Client struct {
-	Conn      *websocket.Conn
-	UserID    string
-	Send      chan interface{}
-	Connected bool
-	mu        sync.RWMutex
+	Conn         *websocket.Conn
+	UserID       string
+	Send         chan interface{}
+	Connected    bool
+	mu           sync.RWMutex
+	ConnectionID int64
 }
 
 type Hub struct {
@@ -93,23 +97,32 @@ func (h *Hub) Run() {
             h.mu.Lock()
 
             if existingClient, exists := h.userClients[client.UserID]; exists {
-                log.Printf("User %s already connected, closing existing connection", client.UserID)
+                log.Printf("User %s already connected (conn %d), closing existing connection (conn %d)",
+                    client.UserID, client.ConnectionID, existingClient.ConnectionID)
+
                 if _, ok := h.clients[existingClient]; ok {
                     delete(h.clients, existingClient)
-                    delete(h.userClients, client.UserID) // Clean up user mapping immediately
+                    delete(h.userClients, client.UserID)
 
-                    // Mark existing client as disconnected before closing
+                    // Mark existing client as disconnected immediately
                     existingClient.mu.Lock()
                     existingClient.Connected = false
                     existingClient.mu.Unlock()
 
-                    // Close existing connection in a goroutine to avoid blocking
-                    go func(oldClient *Client) {
-                        close(oldClient.Send)
+                    // Close existing connection synchronously to ensure it's fully closed
+                    // before registering the new one
+                    func(oldClient *Client) {
+                        select {
+                        case <-oldClient.Send:
+                            // Channel already closed
+                        default:
+                            close(oldClient.Send)
+                        }
                         oldClient.Conn.Close()
-                        // Clean up voice connections for the old connection
-                        voice.DisconnectUserFromAllVoiceRooms(oldClient.UserID)
                     }(existingClient)
+
+                    // Clean up voice connections in background
+                    go voice.DisconnectUserFromAllVoiceRooms(existingClient.UserID)
                 }
             }
 
@@ -121,37 +134,46 @@ func (h *Hub) Run() {
             client.mu.Unlock()
 
             h.mu.Unlock()
-            log.Printf("User %s connected", client.UserID)
+            log.Printf("User %s connected (conn %d)", client.UserID, client.ConnectionID)
 
 		case client := <-h.unregister:
             h.mu.Lock()
-            if _, ok := h.clients[client]; ok {
-                delete(h.clients, client)
-                delete(h.userClients, client.UserID)
 
-                // Only close if not already closed
-                select {
-                case <-client.Send:
-                    // Channel already closed
-                default:
-                    close(client.Send)
+            // Only unregister if this is still the current client for this user
+            currentClient, exists := h.userClients[client.UserID]
+            if exists && currentClient.ConnectionID == client.ConnectionID {
+                if _, ok := h.clients[client]; ok {
+                    delete(h.clients, client)
+                    delete(h.userClients, client.UserID)
+
+                    // Only close if not already closed
+                    select {
+                    case <-client.Send:
+                        // Channel already closed
+                    default:
+                        close(client.Send)
+                    }
+
+                    client.mu.Lock()
+                    client.Connected = false
+                    client.mu.Unlock()
+
+                    log.Printf("User %s disconnected (conn %d), cleaning up voice rooms", client.UserID, client.ConnectionID)
+
+                    // Move cleanup outside the lock to prevent blocking
+                    go func(userID string) {
+                        voice.DisconnectUserFromAllVoiceRooms(userID)
+                        h.BroadcastMessage("user_status", UserStatusData{
+                            UserID: userID,
+                            Status: "offline",
+                        })
+                    }(client.UserID)
                 }
-
-                client.mu.Lock()
-                client.Connected = false
-                client.mu.Unlock()
+            } else {
+                log.Printf("Ignoring unregister for outdated connection %d (current: %d)",
+                    client.ConnectionID, currentClient.ConnectionID)
             }
             h.mu.Unlock()
-
-            log.Printf("User %s disconnected, cleaning up voice rooms", client.UserID)
-
-            go func(userID string) {
-                voice.DisconnectUserFromAllVoiceRooms(userID)
-                h.BroadcastMessage("user_status", UserStatusData{
-                    UserID: userID,
-                    Status: "offline",
-                })
-            }(client.UserID)
 
 		case message := <-h.broadcast:
 			select {
@@ -334,18 +356,25 @@ func (h *Hub) DisconnectUser(userID string) {
 func (c *Client) readPump() {
 	defer func() {
         c.mu.Lock()
+        wasConnected := c.Connected
         c.Connected = false
         c.mu.Unlock()
 
-        // Only unregister if this client is still the active one for this user
-        GlobalHub.mu.RLock()
-        currentClient, exists := GlobalHub.userClients[c.UserID]
-        isCurrentClient := exists && currentClient == c
-        GlobalHub.mu.RUnlock()
+        // Only unregister if this client was actually connected and is still the active one
+        if wasConnected {
+            GlobalHub.mu.RLock()
+            currentClient, exists := GlobalHub.userClients[c.UserID]
+            isCurrentClient := exists && currentClient.ConnectionID == c.ConnectionID
+            GlobalHub.mu.RUnlock()
 
-        if isCurrentClient {
-            GlobalHub.unregister <- c
+            if isCurrentClient {
+                GlobalHub.unregister <- c
+            } else {
+                log.Printf("Not unregistering connection %d for user %s (superseded by connection %d)",
+                    c.ConnectionID, c.UserID, currentClient.ConnectionID)
+            }
         }
+
         c.Conn.Close()
     }()
 
@@ -357,6 +386,17 @@ func (c *Client) readPump() {
     })
 
 	for {
+		// Check if we're still the active connection for this user
+		GlobalHub.mu.RLock()
+		currentClient, exists := GlobalHub.userClients[c.UserID]
+		isCurrentClient := exists && currentClient.ConnectionID == c.ConnectionID
+		GlobalHub.mu.RUnlock()
+
+		if !isCurrentClient {
+			log.Printf("Connection %d for user %s is no longer active, terminating read pump", c.ConnectionID, c.UserID)
+			break
+		}
+
 		c.mu.RLock()
 		if !c.Connected {
 			c.mu.RUnlock()
@@ -367,7 +407,7 @@ func (c *Client) readPump() {
 		messageType, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error for user %s: %v", c.UserID, err)
+				log.Printf("WebSocket error for user %s (conn %d): %v", c.UserID, c.ConnectionID, err)
 			}
 			break
 		}
@@ -447,7 +487,18 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			// Check if we're still the active connection
+			GlobalHub.mu.RLock()
+			currentClient, exists := GlobalHub.userClients[c.UserID]
+			isCurrentClient := exists && currentClient.ConnectionID == c.ConnectionID
+			GlobalHub.mu.RUnlock()
+
+			if !isCurrentClient {
+				log.Printf("Connection %d for user %s is no longer active, terminating write pump", c.ConnectionID, c.UserID)
+				return
+			}
+
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
@@ -463,14 +514,25 @@ func (c *Client) writePump() {
 			switch msg := message.(type) {
 			case []byte:
 				if err := c.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					log.Printf("Error writing text message to %s: %v", c.UserID, err)
+					log.Printf("Error writing text message to %s (conn %d): %v", c.UserID, c.ConnectionID, err)
 					return
 				}
 			default:
-				log.Printf("Unknown message type in send channel for user %s: %T", c.UserID, message)
+				log.Printf("Unknown message type in send channel for user %s (conn %d): %T", c.UserID, c.ConnectionID, message)
 			}
 
 		case <-ticker.C:
+			// Check if we're still the active connection
+			GlobalHub.mu.RLock()
+			currentClient, exists := GlobalHub.userClients[c.UserID]
+			isCurrentClient := exists && currentClient.ConnectionID == c.ConnectionID
+			GlobalHub.mu.RUnlock()
+
+			if !isCurrentClient {
+				log.Printf("Connection %d for user %s is no longer active, terminating write pump ping", c.ConnectionID, c.UserID)
+				return
+			}
+
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			c.mu.RLock()
 			connected := c.Connected
@@ -479,7 +541,7 @@ func (c *Client) writePump() {
 				return
 			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("Error sending ping to %s: %v", c.UserID, err)
+				log.Printf("Error sending ping to %s (conn %d): %v", c.UserID, c.ConnectionID, err)
 				return
 			}
 		}
@@ -516,18 +578,25 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{
-		Conn:   conn,
-		UserID: userID,
-		Send:   make(chan interface{}, 32),
+		Conn:         conn,
+		UserID:       userID,
+		Send:         make(chan interface{}, 32),
+		ConnectionID: atomic.AddInt64(&connectionCounter, 1),
 	}
 
+	// Register the client and wait for it to be fully processed
 	GlobalHub.register <- client
 
+	// Start the pumps
 	go client.writePump()
 	go client.readPump()
 
-	GlobalHub.BroadcastMessage("user_status", UserStatusData{
-		UserID: client.UserID,
-		Status: "online",
-	})
+	// Send status broadcast after a brief moment to ensure registration is complete
+	go func() {
+		time.Sleep(10 * time.Millisecond) // Very brief delay to ensure registration
+		GlobalHub.BroadcastMessage("user_status", UserStatusData{
+			UserID: client.UserID,
+			Status: "online",
+		})
+	}()
 }
