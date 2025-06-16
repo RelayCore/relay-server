@@ -343,6 +343,7 @@ func UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 		Name        *string `json:"name,omitempty"`
 		Description *string `json:"description,omitempty"`
 		Position    *int    `json:"position,omitempty"`
+		GroupID     *uint   `json:"group_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -367,6 +368,31 @@ func UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if there are any fields to update
+	if req.Name == nil && req.Description == nil && req.Position == nil && req.GroupID == nil {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	// If group is being changed, verify the new group exists
+	if req.GroupID != nil && *req.GroupID != ch.GroupID {
+		var newGroup channel.Group
+		if err := db.DB.First(&newGroup, *req.GroupID).Error; err != nil {
+			http.Error(w, "New group not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	// Track which channels were affected for websocket broadcast
+	type ChannelUpdate struct {
+		ID          uint    `json:"id"`
+		Name        *string `json:"name,omitempty"`
+		Description *string `json:"description,omitempty"`
+		GroupID     uint    `json:"group_id"`
+		Position    int     `json:"position"`
+	}
+	var updatedChannels []ChannelUpdate
+
 	// Update fields if provided
 	updates := make(map[string]interface{})
 	if req.Name != nil {
@@ -379,60 +405,183 @@ func UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
-	if req.Position != nil {
-		updates["position"] = *req.Position
+
+	// Handle group changes
+	isGroupChanged := req.GroupID != nil && *req.GroupID != ch.GroupID
+	var newGroupPosition int
+
+	if isGroupChanged {
+		// Get the next position in the new group
+		db.DB.Model(&channel.Channel{}).Where("group_id = ?", *req.GroupID).Select("COALESCE(MAX(position), -1) + 1").Scan(&newGroupPosition)
+		updates["group_id"] = *req.GroupID
+		updates["position"] = newGroupPosition
 	}
 
-	if len(updates) == 0 {
-		http.Error(w, "No fields to update", http.StatusBadRequest)
+	// Handle position updates (only if not changing groups)
+	if req.Position != nil && !isGroupChanged {
+		oldPosition := ch.Position
+		newPosition := *req.Position
+
+		if oldPosition != newPosition {
+			// Start transaction for position updates
+			tx := db.DB.Begin()
+			defer func() {
+				if r := recover(); r != nil {
+					tx.Rollback()
+				}
+			}()
+
+			// Get affected channels for broadcast
+			var affectedChannels []channel.Channel
+			if newPosition > oldPosition {
+				// Moving down: get channels that will shift up
+				tx.Where("group_id = ? AND position > ? AND position <= ? AND id != ?",
+					ch.GroupID, oldPosition, newPosition, req.ChannelID).Find(&affectedChannels)
+			} else {
+				// Moving up: get channels that will shift down
+				tx.Where("group_id = ? AND position >= ? AND position < ? AND id != ?",
+					ch.GroupID, newPosition, oldPosition, req.ChannelID).Find(&affectedChannels)
+			}
+
+			// Add affected channels to update list
+			for _, affectedCh := range affectedChannels {
+				var newPos int
+				if newPosition > oldPosition {
+					newPos = affectedCh.Position - 1
+				} else {
+					newPos = affectedCh.Position + 1
+				}
+				updatedChannels = append(updatedChannels, ChannelUpdate{
+					ID:       affectedCh.ID,
+					GroupID:  affectedCh.GroupID,
+					Position: newPos,
+				})
+			}
+
+			// Update other channels' positions in the same group
+			if newPosition > oldPosition {
+				if err := tx.Model(&channel.Channel{}).
+					Where("group_id = ? AND position > ? AND position <= ? AND id != ?",
+						ch.GroupID, oldPosition, newPosition, req.ChannelID).
+					Update("position", gorm.Expr("position - 1")).Error; err != nil {
+					tx.Rollback()
+					http.Error(w, "Failed to update channel positions", http.StatusInternalServerError)
+					return
+				}
+			} else if newPosition < oldPosition {
+				if err := tx.Model(&channel.Channel{}).
+					Where("group_id = ? AND position >= ? AND position < ? AND id != ?",
+						ch.GroupID, newPosition, oldPosition, req.ChannelID).
+					Update("position", gorm.Expr("position + 1")).Error; err != nil {
+					tx.Rollback()
+					http.Error(w, "Failed to update channel positions", http.StatusInternalServerError)
+					return
+				}
+			}
+
+			updates["position"] = newPosition
+
+			// Update the channel
+			if err := tx.Model(&ch).Updates(updates).Error; err != nil {
+				tx.Rollback()
+				http.Error(w, "Failed to update channel", http.StatusInternalServerError)
+				return
+			}
+
+			// Commit transaction
+			if err := tx.Commit().Error; err != nil {
+				http.Error(w, "Failed to commit updates", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// No position change, just update other fields
+			if len(updates) > 0 {
+				if err := db.DB.Model(&ch).Updates(updates).Error; err != nil {
+					http.Error(w, "Failed to update channel", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	} else if isGroupChanged {
+		// Handle group change with transaction to clean up old positions
+		tx := db.DB.Begin()
+		defer func() {
+			if r := recover(); r != nil {
+				tx.Rollback()
+			}
+		}()
+
+		// Get channels that will shift up in the old group
+		var oldGroupChannels []channel.Channel
+		tx.Where("group_id = ? AND position > ?", ch.GroupID, ch.Position).Find(&oldGroupChannels)
+
+		// Add old group affected channels to update list
+		for _, oldCh := range oldGroupChannels {
+			updatedChannels = append(updatedChannels, ChannelUpdate{
+				ID:       oldCh.ID,
+				GroupID:  oldCh.GroupID,
+				Position: oldCh.Position - 1,
+			})
+		}
+
+		// Update the channel first
+		if err := tx.Model(&ch).Updates(updates).Error; err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to update channel", http.StatusInternalServerError)
+			return
+		}
+
+		// Clean up positions in the old group by shifting channels up
+		if err := tx.Model(&channel.Channel{}).
+			Where("group_id = ? AND position > ?", ch.GroupID, ch.Position).
+			Update("position", gorm.Expr("position - 1")).Error; err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to update old group positions", http.StatusInternalServerError)
+			return
+		}
+
+		// Commit transaction
+		if err := tx.Commit().Error; err != nil {
+			http.Error(w, "Failed to commit group change", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// No position or group change, just update other fields
+		if len(updates) > 0 {
+			if err := db.DB.Model(&ch).Updates(updates).Error; err != nil {
+				http.Error(w, "Failed to update channel", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	// Reload the channel to get updated data
+	if err := db.DB.First(&ch, req.ChannelID).Error; err != nil {
+		http.Error(w, "Failed to reload updated channel", http.StatusInternalServerError)
 		return
 	}
 
-	if err := db.DB.Model(&ch).Updates(updates).Error; err != nil {
-		http.Error(w, "Failed to update channel", http.StatusInternalServerError)
-		return
+	// Add the main updated channel to the list
+	mainUpdate := ChannelUpdate{
+		ID:       ch.ID,
+		GroupID:  ch.GroupID,
+		Position: ch.Position,
 	}
-
-	// Fetch updated channel with group info and permissions
-	var group channel.Group
-	db.DB.First(&group, ch.GroupID)
-
-	var permissions []channel.ChannelPermission
-	db.DB.Where("channel_id = ?", ch.ID).Find(&permissions)
-
-	// Convert permissions to response format
-	permissionResponses := make([]ChannelPermissionResponse, 0, len(permissions))
-	for _, perm := range permissions {
-		permissionResponses = append(permissionResponses, ChannelPermissionResponse{
-			ID:        perm.ID,
-			ChannelID: perm.ChannelID,
-			UserID:    perm.UserID,
-			RoleName:  perm.RoleName,
-			CanRead:   perm.CanRead,
-			CanWrite:  perm.CanWrite,
-			CanPin:    perm.CanPin,
-			IsAdmin:   perm.IsAdmin,
-			CreatedAt: perm.CreatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"),
-			UpdatedAt: perm.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"),
-		})
+	if req.Name != nil {
+		mainUpdate.Name = req.Name
 	}
-
-	response := ChannelResponse{
-		ID:          ch.ID,
-		Name:        ch.Name,
-		Description: ch.Description,
-		GroupID:     ch.GroupID,
-		GroupName:   group.Name,
-		Position:    ch.Position,
-		Type:        string(ch.Type),
-		IsVoice:     ch.Type == channel.ChannelTypeVoice,
-		Permissions: permissionResponses,
+	if req.Description != nil {
+		mainUpdate.Description = req.Description
 	}
+	updatedChannels = append(updatedChannels, mainUpdate)
 
-	websocket.GlobalHub.BroadcastMessage("channel_update", response)
+	// Broadcast the channel updates
+	websocket.GlobalHub.BroadcastMessage("channels_update", map[string]interface{}{
+		"channels": updatedChannels,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(updatedChannels)
 }
 
 // SetChannelPermissionHandler sets permissions for a user or role on a channel
