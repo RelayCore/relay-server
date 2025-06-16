@@ -89,49 +89,69 @@ func (h *Hub) Run() {
 
 	for {
 		select {
-		case client := <-h.register:
-			h.mu.Lock()
+        case client := <-h.register:
+            h.mu.Lock()
 
-			if existingClient, exists := h.userClients[client.UserID]; exists {
-				log.Printf("User %s already connected, closing existing connection", client.UserID)
-				if _, ok := h.clients[existingClient]; ok {
-					delete(h.clients, existingClient)
-					close(existingClient.Send)
-					existingClient.Conn.Close()
-				}
-			}
+            if existingClient, exists := h.userClients[client.UserID]; exists {
+                log.Printf("User %s already connected, closing existing connection", client.UserID)
+                if _, ok := h.clients[existingClient]; ok {
+                    delete(h.clients, existingClient)
+                    delete(h.userClients, client.UserID) // Clean up user mapping immediately
 
-			h.clients[client] = true
-			h.userClients[client.UserID] = client
-			client.mu.Lock()
-			client.Connected = true
-			client.mu.Unlock()
+                    // Mark existing client as disconnected before closing
+                    existingClient.mu.Lock()
+                    existingClient.Connected = false
+                    existingClient.mu.Unlock()
 
-			h.mu.Unlock()
-			log.Printf("User %s connected", client.UserID)
+                    // Close existing connection in a goroutine to avoid blocking
+                    go func(oldClient *Client) {
+                        close(oldClient.Send)
+                        oldClient.Conn.Close()
+                        // Clean up voice connections for the old connection
+                        voice.DisconnectUserFromAllVoiceRooms(oldClient.UserID)
+                    }(existingClient)
+                }
+            }
+
+            // Add new client
+            h.clients[client] = true
+            h.userClients[client.UserID] = client
+            client.mu.Lock()
+            client.Connected = true
+            client.mu.Unlock()
+
+            h.mu.Unlock()
+            log.Printf("User %s connected", client.UserID)
 
 		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				delete(h.userClients, client.UserID)
-				close(client.Send)
+            h.mu.Lock()
+            if _, ok := h.clients[client]; ok {
+                delete(h.clients, client)
+                delete(h.userClients, client.UserID)
 
-				client.mu.Lock()
-				client.Connected = false
-				client.mu.Unlock()
-			}
-			h.mu.Unlock()
+                // Only close if not already closed
+                select {
+                case <-client.Send:
+                    // Channel already closed
+                default:
+                    close(client.Send)
+                }
 
-			log.Printf("User %s disconnected, cleaning up voice rooms", client.UserID)
+                client.mu.Lock()
+                client.Connected = false
+                client.mu.Unlock()
+            }
+            h.mu.Unlock()
 
-			go func(userID string) {
-				voice.DisconnectUserFromAllVoiceRooms(userID)
-				h.BroadcastMessage("user_status", UserStatusData{
-					UserID: userID,
-					Status: "offline",
-				})
-			}(client.UserID)
+            log.Printf("User %s disconnected, cleaning up voice rooms", client.UserID)
+
+            go func(userID string) {
+                voice.DisconnectUserFromAllVoiceRooms(userID)
+                h.BroadcastMessage("user_status", UserStatusData{
+                    UserID: userID,
+                    Status: "offline",
+                })
+            }(client.UserID)
 
 		case message := <-h.broadcast:
 			select {
@@ -284,20 +304,28 @@ func (h *Hub) IsUserConnected(userID string) bool {
 
 func (c *Client) readPump() {
 	defer func() {
-		c.mu.Lock()
-		c.Connected = false
-		c.mu.Unlock()
+        c.mu.Lock()
+        c.Connected = false
+        c.mu.Unlock()
 
-		GlobalHub.unregister <- c
-		c.Conn.Close()
-	}()
+        // Only unregister if this client is still the active one for this user
+        GlobalHub.mu.RLock()
+        currentClient, exists := GlobalHub.userClients[c.UserID]
+        isCurrentClient := exists && currentClient == c
+        GlobalHub.mu.RUnlock()
 
-	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
+        if isCurrentClient {
+            GlobalHub.unregister <- c
+        }
+        c.Conn.Close()
+    }()
+
+    c.Conn.SetReadLimit(maxMessageSize)
+    c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+    c.Conn.SetPongHandler(func(string) error {
+        c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+        return nil
+    })
 
 	for {
 		c.mu.RLock()
