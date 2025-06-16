@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,12 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+)
+
+const (
+    rtpBufferSize     = 1024
+	maxForwardWorkers = 10
+    packetTimeout     = 10 * time.Millisecond
 )
 
 type SignalingMessage struct {
@@ -39,6 +46,18 @@ type SignalingServer struct {
 	broadcaster MessageBroadcaster
 	api         *webrtc.API
 	config      webrtc.Configuration
+	packetBuffer    chan rtpPacketBuffer
+    forwardWorkers  sync.WaitGroup
+    ctx             context.Context
+    cancel          context.CancelFunc
+    channelConnections map[uint][]*PeerConnection // Cache connections by channel
+    channelMu       sync.RWMutex
+}
+
+type rtpPacketBuffer struct {
+    packet   *rtp.Packet
+    kind     webrtc.RTPCodecType
+    fromUser string
 }
 
 type MessageBroadcaster interface {
@@ -49,34 +68,287 @@ type MessageBroadcaster interface {
 var GlobalSignalingServer *SignalingServer
 
 func init() {
-	// Create WebRTC API with media engine
-	mediaEngine := &webrtc.MediaEngine{}
+    // Create WebRTC API with media engine
+    mediaEngine := &webrtc.MediaEngine{}
 
-	// Setup codecs
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		log.Fatal("Failed to register codecs:", err)
-	}
+    // Setup codecs
+    if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+        log.Fatal("Failed to register codecs:", err)
+    }
 
-	// Create API with media engine
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
+    // Create API with media engine
+    api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 
-	// STUN servers for NAT traversal
-	config := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	}
+    // STUN servers for NAT traversal
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
 
-	GlobalSignalingServer = &SignalingServer{
-		connections: make(map[string]*PeerConnection),
-		api:         api,
-		config:      config,
-	}
+    ctx, cancel := context.WithCancel(context.Background())
 
-	// Start cleanup routine
-	go GlobalSignalingServer.cleanupRoutine()
+    // Initialize GlobalSignalingServer FIRST
+    GlobalSignalingServer = &SignalingServer{
+        connections:        make(map[string]*PeerConnection),
+        channelConnections: make(map[uint][]*PeerConnection),
+        api:                api,
+        config:             config,
+        packetBuffer:       make(chan rtpPacketBuffer, rtpBufferSize),
+        ctx:                ctx,
+        cancel:             cancel,
+    }
+
+    // THEN start the worker goroutines
+    for i := 0; i < maxForwardWorkers; i++ {
+        go GlobalSignalingServer.packetForwardWorker()
+    }
+
+    // Start cleanup routine
+    go GlobalSignalingServer.cleanupRoutine()
+}
+
+func (s *SignalingServer) packetForwardWorker() {
+    s.forwardWorkers.Add(1)
+    defer s.forwardWorkers.Done()
+
+    for {
+        select {
+        case <-s.ctx.Done():
+            return
+        case packet := <-s.packetBuffer:
+            s.forwardPacketToChannel(packet)
+        }
+    }
+}
+
+func (s *SignalingServer) forwardTrackToChannel(fromUserID string, channelID uint, track *webrtc.TrackRemote) {
+    // Use a separate goroutine to avoid blocking the main connection
+    go func() {
+        defer func() {
+            if r := recover(); r != nil {
+                log.Printf("Panic in forwardTrackToChannel: %v", r)
+            }
+        }()
+
+        // Create a buffer for batch processing
+        packetBatch := make([]*rtp.Packet, 0, 10)
+        batchTimer := time.NewTicker(5 * time.Millisecond) // Process batches every 5ms
+        defer batchTimer.Stop()
+
+        for {
+            select {
+            case <-s.ctx.Done():
+                return
+            case <-batchTimer.C:
+                if len(packetBatch) > 0 {
+                    // Process batch
+                    for _, packet := range packetBatch {
+                        s.queuePacketForward(packet, track.Kind(), fromUserID, channelID)
+                    }
+                    packetBatch = packetBatch[:0] // Reset batch
+                }
+            default:
+                // Try to read a packet with timeout
+                done := make(chan bool, 1)
+                var rtpPacket *rtp.Packet
+                var err error
+
+                go func() {
+                    rtpPacket, _, err = track.ReadRTP()
+                    done <- true
+                }()
+
+                select {
+                case <-done:
+                    if err != nil {
+                        if err == io.EOF {
+                            return
+                        }
+                        log.Printf("Error reading RTP packet: %v", err)
+                        continue
+                    }
+                    packetBatch = append(packetBatch, rtpPacket)
+
+                    // If batch is full, process immediately
+                    if len(packetBatch) >= 10 {
+                        for _, packet := range packetBatch {
+                            s.queuePacketForward(packet, track.Kind(), fromUserID, channelID)
+                        }
+                        packetBatch = packetBatch[:0]
+                    }
+                case <-time.After(100 * time.Millisecond):
+                    // Timeout - process current batch if any
+                    if len(packetBatch) > 0 {
+                        for _, packet := range packetBatch {
+                            s.queuePacketForward(packet, track.Kind(), fromUserID, channelID)
+                        }
+                        packetBatch = packetBatch[:0]
+                    }
+                }
+            }
+        }
+    }()
+}
+
+func (s *SignalingServer) queuePacketForward(packet *rtp.Packet, kind webrtc.RTPCodecType, fromUserID string, channelID uint) {
+    select {
+    case s.packetBuffer <- rtpPacketBuffer{
+        packet:   packet,
+        kind:     kind,
+        fromUser: fromUserID,
+    }:
+    default:
+        // Buffer full, drop packet (better than blocking)
+        log.Printf("Packet buffer full, dropping packet from %s", fromUserID)
+    }
+}
+
+func (s *SignalingServer) forwardPacketToChannel(packetBuffer rtpPacketBuffer) {
+    // Get channel connections (cached for performance)
+    connections := s.getChannelConnections(packetBuffer.fromUser)
+
+    // Forward to all connections in parallel
+    var wg sync.WaitGroup
+    for _, pc := range connections {
+        if pc.UserID == packetBuffer.fromUser {
+            continue // Don't forward to sender
+        }
+
+        wg.Add(1)
+        go func(conn *PeerConnection) {
+            defer wg.Done()
+            s.forwardRTPPacketOptimized(conn, packetBuffer.kind, packetBuffer.packet)
+        }(pc)
+    }
+    wg.Wait()
+}
+
+func (s *SignalingServer) getChannelConnections(userID string) []*PeerConnection {
+    // Get channel ID from user's connection
+    s.mu.RLock()
+    var channelID uint
+    for _, conn := range s.connections {
+        if conn.UserID == userID {
+            channelID = conn.ChannelID
+            break
+        }
+    }
+    s.mu.RUnlock()
+
+    if channelID == 0 {
+        return nil
+    }
+
+    // Check cached connections first
+    s.channelMu.RLock()
+    cached, exists := s.channelConnections[channelID]
+    s.channelMu.RUnlock()
+
+    if exists && len(cached) > 0 {
+        // Validate cache
+        valid := true
+        for _, conn := range cached {
+            conn.mu.RLock()
+            if conn.State != webrtc.PeerConnectionStateConnected {
+                valid = false
+            }
+            conn.mu.RUnlock()
+            if !valid {
+                break
+            }
+        }
+
+        if valid {
+            return cached
+        }
+    }
+
+    // Rebuild cache
+    s.mu.RLock()
+    connections := make([]*PeerConnection, 0)
+    for _, conn := range s.connections {
+        if conn.ChannelID == channelID {
+            conn.mu.RLock()
+            if conn.State == webrtc.PeerConnectionStateConnected {
+                connections = append(connections, conn)
+            }
+            conn.mu.RUnlock()
+        }
+    }
+    s.mu.RUnlock()
+
+    // Update cache
+    s.channelMu.Lock()
+    s.channelConnections[channelID] = connections
+    s.channelMu.Unlock()
+
+    return connections
+}
+
+func (s *SignalingServer) forwardRTPPacketOptimized(pc *PeerConnection, kind webrtc.RTPCodecType, packet *rtp.Packet) {
+    // Quick state check without lock if possible
+    pc.mu.RLock()
+    if pc.State != webrtc.PeerConnectionStateConnected {
+        pc.mu.RUnlock()
+        return
+    }
+
+    // Determine track type
+    var trackKey string
+    switch kind {
+    case webrtc.RTPCodecTypeAudio:
+        trackKey = "audio"
+    case webrtc.RTPCodecTypeVideo:
+        trackKey = "video"
+    default:
+        pc.mu.RUnlock()
+        return
+    }
+
+    // Get local track
+    localTrack, exists := pc.LocalTracks[trackKey]
+    if !exists {
+        pc.mu.RUnlock()
+        return
+    }
+    pc.mu.RUnlock()
+
+    // Create packet copy (reuse buffer if possible)
+    forwardPacket := &rtp.Packet{
+        Header: packet.Header, // Copy header by value
+        Payload: make([]byte, len(packet.Payload)),
+    }
+    copy(forwardPacket.Payload, packet.Payload)
+
+    // Write with timeout to prevent blocking
+    done := make(chan error, 1)
+    go func() {
+        done <- localTrack.WriteRTP(forwardPacket)
+    }()
+
+    select {
+    case err := <-done:
+        if err != nil && err.Error() != "InvalidStateError" {
+            log.Printf("Error writing RTP packet to %s track for user %s: %v",
+                trackKey, pc.UserID, err)
+        } else {
+            // Update activity timestamp on successful write
+            pc.mu.Lock()
+            pc.LastActivity = time.Now()
+            pc.mu.Unlock()
+        }
+    case <-time.After(packetTimeout):
+        log.Printf("Timeout writing RTP packet to user %s", pc.UserID)
+    }
+}
+
+func (s *SignalingServer) invalidateChannelCache(channelID uint) {
+    s.channelMu.Lock()
+    delete(s.channelConnections, channelID)
+    s.channelMu.Unlock()
 }
 
 func (s *SignalingServer) SetBroadcaster(broadcaster MessageBroadcaster) {
@@ -110,6 +382,8 @@ func (s *SignalingServer) handleOffer(msg SignalingMessage) error {
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %v", err)
 	}
+
+	defer s.invalidateChannelCache(pc.ChannelID)
 
 	// Parse the offer
 	offerData, ok := msg.Data.(map[string]interface{})
@@ -400,94 +674,6 @@ func (s *SignalingServer) handlePeerDisconnect(msg SignalingMessage) error {
 	return nil
 }
 
-func (s *SignalingServer) forwardTrackToChannel(fromUserID string, channelID uint, track *webrtc.TrackRemote) {
-	// Read RTP packets from the track
-	for {
-		rtpPacket, _, err := track.ReadRTP()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("Error reading RTP packet: %v", err)
-			continue
-		}
-
-		// Forward to all other participants in the channel
-		s.mu.RLock()
-		for _, pc := range s.connections {
-			if pc.ChannelID == channelID && pc.UserID != fromUserID {
-				s.forwardRTPPacket(pc, track.Kind(), rtpPacket)
-			}
-		}
-		s.mu.RUnlock()
-	}
-}
-
-func (s *SignalingServer) forwardRTPPacket(pc *PeerConnection, kind webrtc.RTPCodecType, packet *rtp.Packet) {
-    pc.mu.RLock()
-    defer pc.mu.RUnlock()
-
-    // Skip if peer connection is not in a good state
-    if pc.State != webrtc.PeerConnectionStateConnected {
-        return
-    }
-
-    // Determine track type based on RTPCodecType
-    var trackKey string
-    switch kind {
-		case webrtc.RTPCodecTypeAudio:
-			trackKey = "audio"
-		case webrtc.RTPCodecTypeVideo:
-			trackKey = "video"
-		default:
-			log.Printf("Unknown RTP codec type: %v", kind)
-			return
-    }
-
-    // Get the appropriate local track
-    localTrack, exists := pc.LocalTracks[trackKey]
-    if !exists {
-        log.Printf("No local track found for type: %s", trackKey)
-        return
-    }
-
-    // Validate packet before forwarding
-    if packet == nil {
-        log.Printf("Received nil RTP packet")
-        return
-    }
-
-    // Create a copy of the packet to avoid race conditions
-    forwardPacket := &rtp.Packet{
-        Header: rtp.Header{
-            Version:        packet.Header.Version,
-            Padding:        packet.Header.Padding,
-            Extension:      packet.Header.Extension,
-            Marker:         packet.Header.Marker,
-            PayloadType:    packet.Header.PayloadType,
-            SequenceNumber: packet.Header.SequenceNumber,
-            Timestamp:      packet.Header.Timestamp,
-            SSRC:           packet.Header.SSRC,
-            CSRC:           packet.Header.CSRC,
-        },
-        Payload: make([]byte, len(packet.Payload)),
-    }
-    copy(forwardPacket.Payload, packet.Payload)
-
-    // Write RTP packet to the local track with error handling
-    if err := localTrack.WriteRTP(forwardPacket); err != nil {
-        // Don't log every error as it can be noisy, but track patterns
-        if err.Error() != "InvalidStateError" { // Common when connection is closing
-            log.Printf("Error writing RTP packet to %s track for user %s: %v",
-                trackKey, pc.UserID, err)
-        }
-        return
-    }
-
-    // Update activity timestamp on successful forward
-    pc.LastActivity = time.Now()
-}
-
 func (s *SignalingServer) CleanupUserConnections(userID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -530,6 +716,7 @@ func (s *SignalingServer) cleanupConnection(connID string) {
 		pc.PC.Close()
 		delete(s.connections, connID)
 		log.Printf("Cleaned up peer connection: %s", connID)
+		go s.invalidateChannelCache(pc.ChannelID)
 	}
 }
 
