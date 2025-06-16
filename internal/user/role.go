@@ -62,11 +62,10 @@ func (rm *RoleManager) InitializeDefaultRoles() {
     rm.mu.Lock()
     defer rm.mu.Unlock()
 
-    // Admin role - highest authority
-    rm.roles["admin"] = &Role{
-        ID:    "admin",
-        Name:  "Administrator",
-        Color: "#FF0000",
+    rm.roles["owner"] = &Role{
+        ID:    "owner",
+        Name:  "Owner",
+        Color: "#FFD700",
         Rank:  1000,
         Permissions: []Permission{
             PermissionSendMessages, PermissionReadMessages,
@@ -77,35 +76,6 @@ func (rm *RoleManager) InitializeDefaultRoles() {
             PermissionJoinVoice, PermissionSpeakInVoice, PermissionManageVoice,
         },
         Assignable: false, // Only manually assignable
-    }
-
-    // Moderator role
-    rm.roles["moderator"] = &Role{
-        ID:    "moderator",
-        Name:  "Moderator",
-        Color: "#FFA500",
-        Rank:  500,
-        Permissions: []Permission{
-            PermissionSendMessages, PermissionReadMessages,
-            PermissionCreateInvites, PermissionManageInvites,
-            PermissionCreateChannels, PermissionManageChannels,
-            PermissionKickUsers, PermissionManageUsers,
-        },
-        Assignable: true,
-    }
-
-    // Regular user role
-    rm.roles["user"] = &Role{
-        ID:    "user",
-        Name:  "User",
-        Color: "#00FF00",
-        Rank:  100,
-        Permissions: []Permission{
-            PermissionSendMessages, PermissionReadMessages,
-            PermissionCreateInvites,
-            PermissionJoinVoice, PermissionSpeakInVoice,
-        },
-        Assignable: true,
     }
 }
 
@@ -211,12 +181,28 @@ func (rm *RoleManager) CreateRole(role *Role) error {
     return nil
 }
 
+func (rm *RoleManager) UpdateRole(role *Role) error {
+    rm.mu.Lock()
+    defer rm.mu.Unlock()
+
+    // Check if role exists
+    if _, exists := rm.roles[role.ID]; !exists {
+        return fmt.Errorf("role not found")
+    }
+
+    // Update the role in memory
+    rm.roles[role.ID] = role
+
+    // Save to database
+    return rm.SaveRoleToDB(role)
+}
+
 func (rm *RoleManager) DeleteRole(id string) error {
     rm.mu.Lock()
     defer rm.mu.Unlock()
 
     // Don't allow deletion of default roles
-    if id == "admin" || id == "moderator" || id == "user" || id == "guest" {
+    if id == "owner" {
         return fmt.Errorf("cannot delete default role")
     }
 

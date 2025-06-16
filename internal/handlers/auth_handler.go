@@ -54,7 +54,7 @@ func AuthChallengeHandler(w http.ResponseWriter, r *http.Request) {
         // New user - assign appropriate role
         roleIDs := []string{"user"}
         if isFirstUser {
-            roleIDs = []string{"admin"} // First user gets admin role
+            roleIDs = []string{"owner"} // First user gets owner role
         }
 
         newUser := &user.User{
