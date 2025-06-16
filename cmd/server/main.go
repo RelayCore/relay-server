@@ -90,6 +90,7 @@ func main() {
 
     // Role management endpoints
     permissionRoute(mux, "/roles", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.CreateRoleHandler)
+    permissionRoute(mux, "/roles/update", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.UpdateRoleHandler)
     authRoute(mux, "/roles/list", middleware.GlobalRateLimit, Cache10Min, handlers.GetRolesHandler)
     permissionRoute(mux, "/roles/assign", middleware.GlobalRateLimit, user.PermissionAssignRoles, NoCache, handlers.AssignRoleHandler)
     permissionRoute(mux, "/roles/remove", middleware.GlobalRateLimit, user.PermissionAssignRoles, NoCache, handlers.RemoveRoleHandler)
@@ -222,6 +223,6 @@ func createFirstTimeInvite() {
     log.Printf("⚠️  IMPORTANT:")
     log.Printf("• This invite will expire in 24 hours")
     log.Printf("• It can only be used once")
-    log.Printf("• The first user to join will have the 'admin' role")
+    log.Printf("• The first user to join will have the 'owner' role")
     log.Printf("═══════════════════════════════════════════════════════════════")
 }

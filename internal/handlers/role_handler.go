@@ -45,6 +45,80 @@ func CreateRoleHandler(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(req)
 }
 
+func UpdateRoleHandler(w http.ResponseWriter, r *http.Request) {
+    var req struct {
+        ID          string             `json:"id"`
+        Name        string             `json:"name"`
+        Color       string             `json:"color"`
+        Rank        int                `json:"rank"`
+        Permissions []user.Permission  `json:"permissions"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // Validate required fields
+    if req.ID == "" {
+        http.Error(w, "Role ID is required", http.StatusBadRequest)
+        return
+    }
+
+    // Check if role exists
+    existingRole, exists := user.Roles.GetRole(req.ID)
+    if !exists {
+        http.Error(w, "Role not found", http.StatusNotFound)
+        return
+    }
+
+    // Don't allow updating non-assignable roles (default system roles)
+    if !existingRole.Assignable {
+        http.Error(w, "Cannot update system role", http.StatusForbidden)
+        return
+    }
+
+    // Update role with new values, keeping existing values if not provided
+    updatedRole := &user.Role{
+        ID:         req.ID,
+        Assignable: existingRole.Assignable,
+    }
+
+    if req.Name != "" {
+        updatedRole.Name = req.Name
+    } else {
+        updatedRole.Name = existingRole.Name
+    }
+
+    if req.Color != "" {
+        updatedRole.Color = req.Color
+    } else {
+        updatedRole.Color = existingRole.Color
+    }
+
+    if req.Rank != 0 {
+        updatedRole.Rank = req.Rank
+    } else {
+        updatedRole.Rank = existingRole.Rank
+    }
+
+    if req.Permissions != nil {
+        updatedRole.Permissions = req.Permissions
+    } else {
+        updatedRole.Permissions = existingRole.Permissions
+    }
+
+    // Update the role
+    if err := user.Roles.UpdateRole(updatedRole); err != nil {
+        log.Printf("Error updating role: %v", err)
+        http.Error(w, "Failed to update role", http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(updatedRole)
+}
+
 // GetRolesHandler returns all roles
 func GetRolesHandler(w http.ResponseWriter, r *http.Request) {
     roles := user.Roles.GetAllRoles()
