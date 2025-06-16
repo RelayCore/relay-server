@@ -91,6 +91,7 @@ func main() {
     // Role management endpoints
     permissionRoute(mux, "/roles", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.CreateRoleHandler)
     permissionRoute(mux, "/roles/update", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.UpdateRoleHandler)
+    permissionRoute(mux, "/roles/delete", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.DeleteRoleHandler)
     authRoute(mux, "/roles/list", middleware.GlobalRateLimit, Cache10Min, handlers.GetRolesHandler)
     permissionRoute(mux, "/roles/assign", middleware.GlobalRateLimit, user.PermissionAssignRoles, NoCache, handlers.AssignRoleHandler)
     permissionRoute(mux, "/roles/remove", middleware.GlobalRateLimit, user.PermissionAssignRoles, NoCache, handlers.RemoveRoleHandler)

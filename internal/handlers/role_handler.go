@@ -171,3 +171,46 @@ func AssignRoleHandler(w http.ResponseWriter, r *http.Request) {
         "message": "Role assigned successfully",
     })
 }
+
+// DeleteRoleHandler deletes a custom role
+func DeleteRoleHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.ID == "" {
+		http.Error(w, "Role ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if role exists
+	role, exists := user.Roles.GetRole(req.ID)
+	if !exists {
+		http.Error(w, "Role not found", http.StatusNotFound)
+		return
+	}
+
+	// Don't allow deletion of non-assignable roles (default system roles)
+	if !role.Assignable {
+		http.Error(w, "Cannot delete system role", http.StatusForbidden)
+		return
+	}
+
+	// Delete the role
+	if err := user.Roles.DeleteRole(req.ID); err != nil {
+		log.Printf("Error deleting role: %v", err)
+		http.Error(w, "Failed to delete role", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Role deleted successfully",
+	})
+}
