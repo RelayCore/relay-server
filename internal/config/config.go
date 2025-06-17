@@ -16,6 +16,7 @@ type ServerConfig struct {
 	MaxAttachments int    `yaml:"max_attachments"`  // Max number of attachments per message
 	Icon           string `yaml:"icon,omitempty"`
 	Port           string `yaml:"port,omitempty"`   // Server port, e.g. ":8080"
+	TenorAPIKey    string `yaml:"tenor_api_key,omitempty"`
 }
 
 var Conf ServerConfig
@@ -27,10 +28,11 @@ func CreateDefaultConfig(path string) error {
 		Description:    "A real-time communication server",
 		AllowInvite:    true,
 		MaxUsers:       100,
-		MaxFileSize:    50,  // 50MB
+		MaxFileSize:    52428800,
 		MaxAttachments: 10,
 		Icon:           "",
 		Port:           ":8080",
+		TenorAPIKey:    "",
 	}
 
 	data, err := yaml.Marshal(&defaultConfig)

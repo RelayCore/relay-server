@@ -23,6 +23,7 @@ type ServerMetadataResponse struct {
 	MaxFileSize    int64  `json:"max_file_size"`
 	MaxAttachments int    `json:"max_attachments"`
 	Icon           string `json:"icon,omitempty"`
+	TenorEnabled   bool   `json:"tenor_enabled"`
 }
 
 // GetServerMetadataHandler returns server metadata information
@@ -54,6 +55,7 @@ func GetServerMetadataHandler(w http.ResponseWriter, r *http.Request) {
 		MaxFileSize:    maxFileSizeMB,
 		MaxAttachments: config.Conf.MaxAttachments,
 		Icon:           iconPath,
+		TenorEnabled:   config.Conf.TenorAPIKey != "",
 	}
 
 	w.Header().Set("Content-Type", "application/json")

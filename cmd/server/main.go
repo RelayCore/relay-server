@@ -146,6 +146,11 @@ func main() {
     permissionRoute(mux, "/server/icon", middleware.GlobalRateLimit, user.PermissionManageServer, Cache10Min, handlers.UploadServerIconHandler)
     permissionRoute(mux, "/server/config", middleware.GlobalRateLimit, user.PermissionManageServer, NoCache, handlers.UpdateServerConfigHandler)
 
+    // Tenor API endpoints
+    authRoute(mux, "/tenor/search", middleware.GlobalRateLimit, Cache1Min, handlers.TenorSearchHandler)
+    authRoute(mux, "/tenor/trending", middleware.GlobalRateLimit, Cache2Min, handlers.TenorTrendingHandler)
+    authRoute(mux, "/tenor/categories", middleware.GlobalRateLimit, Cache10Min, handlers.TenorCategoriesHandler)
+
     // Check for first-time setup after everything is initialized
     go func() {
         time.Sleep(5 * time.Second) // Give time for any existing auth processes
