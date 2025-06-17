@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relay-server/internal/middleware"
 	"relay-server/internal/user"
 	"relay-server/internal/voice"
 
@@ -36,6 +37,7 @@ type Client struct {
 	Connected    bool
 	mu           sync.RWMutex
 	ConnectionID int64
+	IPAddress    string
 }
 
 type Hub struct {
@@ -71,6 +73,11 @@ type OnlineUsersData struct {
 type UserStatusData struct {
 	UserID string `json:"user_id"`
 	Status string `json:"status"`
+}
+
+type ConnectionInfo struct {
+    IPAddress string
+    UserAgent string
 }
 
 var GlobalHub = &Hub{
@@ -137,7 +144,7 @@ func (h *Hub) Run() {
             user.UpdateLastOnline(client.UserID)
 
             h.mu.Unlock()
-            log.Printf("User %s connected (conn %d)", client.UserID, client.ConnectionID)
+            log.Printf("User %s connected (conn %d) (ip %s)", client.UserID, client.ConnectionID, client.IPAddress)
 
 		case client := <-h.unregister:
             h.mu.Lock()
@@ -581,11 +588,13 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := middleware.GetClientIP(r)
 	client := &Client{
 		Conn:         conn,
 		UserID:       userID,
 		Send:         make(chan interface{}, 32),
 		ConnectionID: atomic.AddInt64(&connectionCounter, 1),
+		IPAddress:    clientIP,
 	}
 
 	// Register the client and wait for it to be fully processed
@@ -603,4 +612,16 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			Status: "online",
 		})
 	}()
+}
+
+func (h *Hub) GetUserConnectionInfo(userID string) *ConnectionInfo {
+    h.mu.RLock()
+    defer h.mu.RUnlock()
+
+    if client, exists := h.userClients[userID]; exists {
+        return &ConnectionInfo{
+            IPAddress: client.IPAddress,
+        }
+    }
+    return nil
 }

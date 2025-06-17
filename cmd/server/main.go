@@ -62,11 +62,13 @@ func main() {
         &user.UserModel{},
         &user.InviteModel{},
         &user.RoleModel{},
+        &user.Ban{},
     )
 
     user.LoadUsersFromDB()
     user.LoadInvitesFromDB()
     user.Roles.LoadRolesFromDB()
+    user.LoadBansFromDB()
     createDefaultChannelIfNeeded()
 
     go websocket.GlobalHub.Run()
@@ -145,6 +147,12 @@ func main() {
     // Server management endpoints
     permissionRoute(mux, "/server/icon", middleware.GlobalRateLimit, user.PermissionManageServer, Cache10Min, handlers.UploadServerIconHandler)
     permissionRoute(mux, "/server/config", middleware.GlobalRateLimit, user.PermissionManageServer, NoCache, handlers.UpdateServerConfigHandler)
+
+    // Moderation endpoints
+    permissionRoute(mux, "/moderation/kick", middleware.GlobalRateLimit, user.PermissionKickUsers, NoCache, handlers.KickUserHandler)
+    permissionRoute(mux, "/moderation/ban", middleware.GlobalRateLimit, user.PermissionBanUsers, NoCache, handlers.BanUserHandler)
+    permissionRoute(mux, "/moderation/unban", middleware.GlobalRateLimit, user.PermissionBanUsers, NoCache, handlers.UnbanUserHandler)
+    permissionRoute(mux, "/moderation/bans", middleware.GlobalRateLimit, user.PermissionBanUsers, Cache5Min, handlers.GetBansHandler)
 
     // Tenor API endpoints
     authRoute(mux, "/tenor/search", middleware.GlobalRateLimit, Cache1Min, handlers.TenorSearchHandler)

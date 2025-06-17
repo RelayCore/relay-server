@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -27,6 +28,18 @@ func CORS(next http.Handler) http.Handler {
             log.Printf("%s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
         }
 
+        clientIP := GetClientIP(r)
+        if ban, isBanned := user.IsIPBanned(clientIP); isBanned {
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(http.StatusForbidden)
+            json.NewEncoder(w).Encode(map[string]interface{}{
+                "error":     "Access denied",
+                "banned_at": ban.BannedAt,
+                "reason":    ban.Reason,
+            })
+            return
+        }
+
         w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -39,6 +52,30 @@ func CORS(next http.Handler) http.Handler {
 
         next.ServeHTTP(w, r)
     })
+}
+
+func GetClientIP(r *http.Request) string {
+    // Check X-Forwarded-For header first (for proxies)
+    forwarded := r.Header.Get("X-Forwarded-For")
+    if forwarded != "" {
+        // Take the first IP if multiple are present
+        ips := strings.Split(forwarded, ",")
+        return strings.TrimSpace(ips[0])
+    }
+
+    // Check X-Real-IP header
+    realIP := r.Header.Get("X-Real-IP")
+    if realIP != "" {
+        return realIP
+    }
+
+    // Fallback to RemoteAddr, removing port if present
+    ip := r.RemoteAddr
+    if colonPos := strings.LastIndex(ip, ":"); colonPos != -1 {
+        ip = ip[:colonPos]
+    }
+
+    return ip
 }
 
 // RequireAuth middleware checks if user is authenticated
