@@ -44,7 +44,6 @@ type AttachmentResponse struct {
 	FileSize      int64                  `json:"file_size"`
 	FilePath      string                 `json:"file_path"`
 	MimeType      string                 `json:"mime_type"`
-	ThumbnailPath *string                `json:"thumbnail_path,omitempty"`
 }
 
 type TaggedUser struct {
@@ -241,7 +240,6 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 			FileSize:      attachment.FileSize,
 			FilePath:      attachment.FilePath,
 			MimeType:      attachment.MimeType,
-			ThumbnailPath: attachment.ThumbnailPath,
 		})
 	}
 
@@ -548,7 +546,6 @@ func EditMessageHandler(w http.ResponseWriter, r *http.Request) {
 				FileSize:      attachment.FileSize,
 				FilePath:      attachment.FilePath,
 				MimeType:      attachment.MimeType,
-				ThumbnailPath: attachment.ThumbnailPath,
 			})
 		}
 	}
@@ -849,17 +846,6 @@ func GetPinnedMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				filePath = util.GetFullURL(r, filePath)
 			}
 
-			var thumbnailPath *string
-			if att.ThumbnailPath != nil {
-				path := *att.ThumbnailPath
-				if path != "" && path[0] == '/' {
-					path = util.GetFullURL(r, path)
-				} else if path != "" {
-					path = util.GetFullURL(r, path)
-				}
-				thumbnailPath = &path
-			}
-
 			attachmentResponses = append(attachmentResponses, AttachmentResponse{
 				ID:            att.ID,
 				Type:          att.Type,
@@ -867,7 +853,6 @@ func GetPinnedMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				FileSize:      att.FileSize,
 				FilePath:      filePath,
 				MimeType:      att.MimeType,
-				ThumbnailPath: thumbnailPath,
 			})
 		}
 
@@ -1043,17 +1028,6 @@ func SearchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				filePath = util.GetFullURL(r, filePath)
 			}
 
-			var thumbnailPath *string
-			if att.ThumbnailPath != nil {
-				path := *att.ThumbnailPath
-				if path != "" && path[0] == '/' {
-					path = util.GetFullURL(r, path)
-				} else if path != "" {
-					path = util.GetFullURL(r, path)
-				}
-				thumbnailPath = &path
-			}
-
 			attachmentResponses = append(attachmentResponses, AttachmentResponse{
 				ID:            att.ID,
 				Type:          att.Type,
@@ -1061,7 +1035,6 @@ func SearchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				FileSize:      att.FileSize,
 				FilePath:      filePath,
 				MimeType:      att.MimeType,
-				ThumbnailPath: thumbnailPath,
 			})
 		}
 

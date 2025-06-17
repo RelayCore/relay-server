@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"relay-server/internal/channel"
@@ -48,6 +49,18 @@ type ChannelPermissionResponse struct {
 	IsAdmin    bool    `json:"is_admin"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
+}
+
+type AttachmentApiResponse struct {
+    ID            uint      `json:"id"`
+    Type          string    `json:"type"`
+    FileName      string    `json:"file_name"`
+    FileSize      int64     `json:"file_size"`
+    FilePath      string    `json:"file_path"`
+    MimeType      string    `json:"mime_type"`
+    FileHash      string    `json:"file_hash"`
+    CreatedAt     time.Time `json:"created_at"`
+    UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func GetChannelsHandler(w http.ResponseWriter, r *http.Request) {
@@ -978,17 +991,6 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				filePath = util.GetFullURL(r, filePath)
 			}
 
-			var thumbnailPath *string
-			if att.ThumbnailPath != nil {
-				path := *att.ThumbnailPath
-				if path != "" && path[0] == '/' {
-					path = util.GetFullURL(r, path)
-				} else if path != "" {
-					path = util.GetFullURL(r, path)
-				}
-				thumbnailPath = &path
-			}
-
 			attachmentResponses = append(attachmentResponses, AttachmentResponse{
 				ID:            att.ID,
 				Type:          att.Type,
@@ -996,7 +998,6 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
 				FileSize:      att.FileSize,
 				FilePath:      filePath,
 				MimeType:      att.MimeType,
-				ThumbnailPath: thumbnailPath,
 			})
 		}
 
@@ -1020,4 +1021,127 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		"messages": messageResponses,
 		"count":    len(messageResponses),
 	})
+}
+
+func GetAllAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
+    // Get query parameters
+    limitStr := r.URL.Query().Get("limit")
+    limit := 50
+    if limitStr != "" {
+        if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 200 {
+            limit = parsedLimit
+        }
+    }
+
+    offsetStr := r.URL.Query().Get("offset")
+    offset := 0
+    if offsetStr != "" {
+        if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+            offset = parsedOffset
+        }
+    }
+
+    // Filter by attachment type if specified
+    attachmentType := r.URL.Query().Get("type")
+
+    // Build query
+    query := db.DB.Model(&channel.Attachment{}).Order("created_at DESC")
+
+    // Apply type filter
+    if attachmentType != "" {
+        query = query.Where("type = ?", attachmentType)
+    }
+
+    // Get total count
+    var total int64
+    if err := query.Count(&total).Error; err != nil {
+        http.Error(w, "Failed to count attachments", http.StatusInternalServerError)
+        return
+    }
+
+    // Apply pagination and fetch attachments
+    var attachments []channel.Attachment
+    if err := query.Limit(limit).Offset(offset).Find(&attachments).Error; err != nil {
+        http.Error(w, "Failed to fetch attachments", http.StatusInternalServerError)
+        return
+    }
+
+    // Convert to response format
+    attachmentResponses := make([]AttachmentApiResponse, 0, len(attachments))
+    for _, attachment := range attachments {
+        // Convert file path to URL-friendly format
+        filePath := attachment.FilePath
+        if filePath != "" {
+            // Replace backslashes with forward slashes for URLs
+            filePath = strings.ReplaceAll(filePath, "\\", "/")
+            // Ensure it starts with /uploads/
+            if !strings.HasPrefix(filePath, "/uploads/") {
+                if strings.HasPrefix(filePath, "uploads/") {
+                    filePath = "/" + filePath
+                } else {
+                    filePath = "/uploads/" + filePath
+                }
+            }
+            filePath = util.GetFullURL(r, filePath)
+        }
+
+        attachmentResponses = append(attachmentResponses, AttachmentApiResponse{
+            ID:            attachment.ID,
+            Type:          string(attachment.Type),
+            FileName:      attachment.FileName,
+            FileSize:      attachment.FileSize,
+            FilePath:      filePath,
+            MimeType:      attachment.MimeType,
+            FileHash:      attachment.FileHash,
+            CreatedAt:     attachment.CreatedAt,
+            UpdatedAt:     attachment.UpdatedAt,
+        })
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "attachments": attachmentResponses,
+        "total":       total,
+        "count":       len(attachmentResponses),
+        "limit":       limit,
+        "offset":      offset,
+    })
+}
+
+// GetAttachmentStatsHandler returns statistics about attachments
+func GetAttachmentStatsHandler(w http.ResponseWriter, r *http.Request) {
+    // Get total attachment count and size
+    var totalCount int64
+    var totalSize int64
+
+    db.DB.Model(&channel.Attachment{}).Count(&totalCount)
+    db.DB.Model(&channel.Attachment{}).Select("COALESCE(SUM(file_size), 0)").Scan(&totalSize)
+
+    // Get statistics by type
+    var typeStats []struct {
+        Type  string `json:"type"`
+        Count int64  `json:"count"`
+        Size  int64  `json:"size"`
+    }
+
+    db.DB.Model(&channel.Attachment{}).
+        Select("type, COUNT(*) as count, COALESCE(SUM(file_size), 0) as size").
+        Group("type").
+        Scan(&typeStats)
+
+    // Convert to map
+    byType := make(map[string]interface{})
+    for _, stat := range typeStats {
+        byType[stat.Type] = map[string]interface{}{
+            "count": stat.Count,
+            "size":  stat.Size,
+        }
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "total_attachments": totalCount,
+        "total_size":        totalSize,
+        "by_type":          byType,
+    })
 }

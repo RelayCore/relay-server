@@ -69,8 +69,7 @@ type Attachment struct {
 	FileSize      int64
 	FilePath      string
 	MimeType      string
-	FileHash      string  `gorm:"index"` // For deduplication
-	ThumbnailPath *string `json:"thumbnail_path,omitempty"`
+	FileHash      string  `gorm:"index"`
 }
 
 type VoiceRoom struct {
