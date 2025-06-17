@@ -272,6 +272,7 @@ type UpdateServerConfigRequest struct {
 	MaxUsers       *int    `json:"max_users,omitempty"`
 	MaxFileSize    *int64  `json:"max_file_size,omitempty"`    // In MB
 	MaxAttachments *int    `json:"max_attachments,omitempty"`
+	TenorEnabled   *bool   `json:"tenor_enabled,omitempty"`
 }
 
 // UpdateServerConfigHandler handles server configuration updates
@@ -346,6 +347,7 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		"max_users":       config.Conf.MaxUsers,
 		"max_file_size":   maxFileSizeMB,
 		"max_attachments": config.Conf.MaxAttachments,
+		"tenor_enabled":   config.Conf.TenorAPIKey != "",
 	}
 
 	// Broadcast server configuration update
@@ -356,6 +358,8 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 			"allow_invite":    config.Conf.AllowInvite,
 			"max_users":       config.Conf.MaxUsers,
 			"max_attachments": config.Conf.MaxAttachments,
+			"max_file_size":   maxFileSizeMB,
+			"tenor_enabled":   config.Conf.TenorAPIKey != "",
 		})
 	}()
 
