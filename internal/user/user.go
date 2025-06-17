@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"log"
 	"relay-server/internal/db"
+	"sync"
 	"time"
 )
 
@@ -119,20 +120,80 @@ func SaveUserToDB(user *User) error {
     return db.DB.Save(&userModel).Error
 }
 
-// UpdateLastOnline updates the user's last online time
-func UpdateLastOnline(userID string) {
-    Mu.Lock()
-    defer Mu.Unlock()
+// Batch update mechanism for last_online updates
+var (
+    lastOnlineUpdates      = make(map[string]time.Time)
+    lastOnlineUpdatesMu    sync.Mutex
+    lastOnlineUpdateTicker *time.Ticker
+)
 
-    if user, exists := Users[userID]; exists {
-        user.LastOnline = time.Now()
-        // Save to database in background to avoid blocking
-        go func() {
-            if err := SaveUserToDB(user); err != nil {
-                log.Printf("Failed to update last online for user %s: %v", userID, err)
+func init() {
+    // Initialize batched update ticker
+    lastOnlineUpdateTicker = time.NewTicker(10 * time.Second)
+    go batchUpdateLastOnline()
+}
+
+// batchUpdateLastOnline processes queued last_online updates in batches
+func batchUpdateLastOnline() {
+    for range lastOnlineUpdateTicker.C {
+        lastOnlineUpdatesMu.Lock()
+        if len(lastOnlineUpdates) == 0 {
+            lastOnlineUpdatesMu.Unlock()
+            continue
+        }
+
+        // Copy the updates and clear the map
+        updates := make(map[string]time.Time)
+        for userID, timestamp := range lastOnlineUpdates {
+            updates[userID] = timestamp
+        }
+        lastOnlineUpdates = make(map[string]time.Time)
+        lastOnlineUpdatesMu.Unlock()
+
+        // Process updates in batch
+        for userID, timestamp := range updates {
+            Mu.RLock()
+            user, exists := Users[userID]
+            Mu.RUnlock()
+
+            if exists {
+                Mu.Lock()
+                user.LastOnline = timestamp
+                Mu.Unlock()
+
+                // Try to save with retry logic
+                go saveUserWithRetry(user, 3)
             }
-        }()
+        }
     }
+}
+
+// saveUserWithRetry attempts to save user data with retry logic for database locks
+func saveUserWithRetry(user *User, maxRetries int) {
+    for attempt := 0; attempt < maxRetries; attempt++ {
+        if err := SaveUserToDB(user); err != nil {
+            if attempt < maxRetries-1 {
+                // Wait with exponential backoff before retry
+                waitTime := time.Duration(100*(attempt+1)) * time.Millisecond
+                log.Printf("Database busy, retrying save for user %s in %v (attempt %d/%d)",
+                    user.ID, waitTime, attempt+1, maxRetries)
+                time.Sleep(waitTime)
+                continue
+            } else {
+                log.Printf("Failed to save user %s after %d attempts: %v", user.ID, maxRetries, err)
+            }
+        } else {
+            // Success
+            break
+        }
+    }
+}
+
+// UpdateLastOnline queues the user's last online time for batched update
+func UpdateLastOnline(userID string) {
+    lastOnlineUpdatesMu.Lock()
+    lastOnlineUpdates[userID] = time.Now()
+    lastOnlineUpdatesMu.Unlock()
 }
 
 // DeleteUserFromDB removes a user from the database

@@ -133,8 +133,8 @@ func (h *Hub) Run() {
             client.Connected = true
             client.mu.Unlock()
 
-            // Update last online time when user connects
-            go user.UpdateLastOnline(client.UserID)
+            // Queue last online time update (non-blocking)
+            user.UpdateLastOnline(client.UserID)
 
             h.mu.Unlock()
             log.Printf("User %s connected (conn %d)", client.UserID, client.ConnectionID)
@@ -163,7 +163,7 @@ func (h *Hub) Run() {
 
                     log.Printf("User %s disconnected (conn %d), cleaning up voice rooms", client.UserID, client.ConnectionID)
 
-                    // Update last online time and cleanup in background
+                    // Queue last online time update and cleanup in background (non-blocking)
                     go func(userID string) {
                         user.UpdateLastOnline(userID)
                         voice.DisconnectUserFromAllVoiceRooms(userID)
