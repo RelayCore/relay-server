@@ -10,6 +10,7 @@ import (
 
 	"relay-server/internal/config"
 	"relay-server/internal/user"
+	"relay-server/internal/websocket"
 )
 
 // ServerMetadataResponse represents the server metadata response
@@ -124,6 +125,13 @@ func UploadServerIconHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast server icon update
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("server_icon_updated", map[string]interface{}{
+			"icon_url": filename,
+		})
+	}()
 
 	// Return success response
 	response := map[string]string{
@@ -337,6 +345,17 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		"max_file_size":   maxFileSizeMB,
 		"max_attachments": config.Conf.MaxAttachments,
 	}
+
+	// Broadcast server configuration update
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("server_config_updated", map[string]interface{}{
+			"name":            config.Conf.Name,
+			"description":     config.Conf.Description,
+			"allow_invite":    config.Conf.AllowInvite,
+			"max_users":       config.Conf.MaxUsers,
+			"max_attachments": config.Conf.MaxAttachments,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)

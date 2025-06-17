@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"relay-server/internal/user"
+	"relay-server/internal/websocket"
 )
 
 // CreateRoleHandler creates a new custom role
@@ -44,6 +45,11 @@ func CreateRoleHandler(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "Failed to create role", http.StatusInternalServerError)
         return
     }
+
+    // Broadcast role creation
+    go func() {
+        websocket.GlobalHub.BroadcastMessage("role_created", req)
+    }()
 
     json.NewEncoder(w).Encode(req)
 }
@@ -125,6 +131,11 @@ func UpdateRoleHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Broadcast role update
+    go func() {
+        websocket.GlobalHub.BroadcastMessage("role_updated", updatedRole)
+    }()
+
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(updatedRole)
 }
@@ -175,6 +186,14 @@ func AssignRoleHandler(w http.ResponseWriter, r *http.Request) {
         log.Printf("Error saving user to database: %v", err)
     }
 
+    // Broadcast role assignment
+    go func() {
+        websocket.GlobalHub.BroadcastMessage("role_assigned", map[string]interface{}{
+            "user_id": req.UserID,
+            "role_id": req.RoleID,
+        })
+    }()
+
     user.Mu.Unlock()
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -218,6 +237,13 @@ func DeleteRoleHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to delete role", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast role deletion
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("role_deleted", map[string]interface{}{
+			"role_id": req.ID,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{

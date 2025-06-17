@@ -555,6 +555,15 @@ func PinMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast message pin event
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("message_pinned", map[string]interface{}{
+			"message_id": req.MessageID,
+			"channel_id": message.ChannelID,
+			"pinned_by":  userID,
+		})
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
@@ -646,6 +655,15 @@ func UnpinMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to unpin message", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast message unpin event
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("message_unpinned", map[string]interface{}{
+			"message_id": req.MessageID,
+			"channel_id": message.ChannelID,
+			"unpinned_by": userID,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

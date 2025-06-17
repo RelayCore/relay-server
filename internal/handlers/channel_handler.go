@@ -178,6 +178,14 @@ func CreateGroupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast group creation
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("group_created", map[string]interface{}{
+			"id":   group.ID,
+			"name": group.Name,
+		})
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(group)
 }
@@ -242,6 +250,20 @@ func CreateChannelHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create channel", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast channel creation
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("channel_created", map[string]interface{}{
+			"id":          ch.ID,
+			"name":        ch.Name,
+			"description": ch.Description,
+			"group_id":    ch.GroupID,
+			"group_name":  group.Name,
+			"position":    ch.Position,
+			"type":        string(ch.Type),
+			"is_voice":    req.IsVoice,
+		})
+	}()
 
 	response := ChannelResponse{
 		ID:          ch.ID,
@@ -322,6 +344,13 @@ func DeleteChannelHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to commit deletion", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast channel deletion
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("channel_deleted", map[string]interface{}{
+			"channel_id": req.ChannelID,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -690,6 +719,14 @@ func SetChannelPermissionHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: permission.UpdatedAt.Format("2006-01-02T15:04:05.999999999Z07:00"),
 	}
 
+	// Broadcast permission change
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("channel_permission_updated", map[string]interface{}{
+			"channel_id": permission.ChannelID,
+			"permission": response,
+		})
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -798,6 +835,15 @@ func DeleteChannelPermissionHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to delete permission", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast permission deletion
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("channel_permission_deleted", map[string]interface{}{
+			"channel_id": req.ChannelID,
+			"user_id":    req.UserID,
+			"role_name":  req.RoleName,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{

@@ -128,6 +128,14 @@ func RemoveRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast role removal
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("role_removed", map[string]interface{}{
+			"user_id": req.UserID,
+			"role_id": req.RoleID,
+		})
+	}()
+
 	user.Mu.Unlock()
 
 	json.NewEncoder(w).Encode(map[string]string{
@@ -190,6 +198,15 @@ func UpdateNicknameHandler(w http.ResponseWriter, r *http.Request) {
 	if targetUser.ProfilePictureHash != "" {
 		profileURL = util.GetProfilePictureURL(r, targetUser.ID)
 	}
+
+	// Broadcast nickname update
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("user_updated", map[string]interface{}{
+			"user_id":  targetUser.ID,
+			"nickname": targetUser.Nickname,
+			"updated_by": requestingUserID,
+		})
+	}()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Nickname updated successfully",
@@ -301,6 +318,14 @@ func UploadProfilePictureHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast profile picture update
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("user_profile_updated", map[string]interface{}{
+			"user_id":            requestingUserID,
+			"profile_picture_url": util.GetFullURL(r, fmt.Sprintf("uploads/icons/%s", filename)),
+		})
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":     "Profile picture uploaded successfully",
@@ -344,6 +369,15 @@ func LeaveServerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to delete user from database", http.StatusInternalServerError)
 		return
 	}
+
+	// Broadcast user leave event
+	go func() {
+		websocket.GlobalHub.BroadcastMessage("user_left", map[string]interface{}{
+			"user_id":  requestingUserID,
+			"username": targetUser.Username,
+			"nickname": targetUser.Nickname,
+		})
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
