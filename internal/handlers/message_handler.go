@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -45,18 +47,87 @@ type AttachmentResponse struct {
 	ThumbnailPath *string                `json:"thumbnail_path,omitempty"`
 }
 
-// MessageResponse represents a message response with user information
+type TaggedUser struct {
+    UserID   string `json:"user_id"`
+    Username string `json:"username"`
+    Nickname string `json:"nickname"`
+}
+
 type MessageResponse struct {
-	ID          uint                 `json:"id"`
-	ChannelID   uint                 `json:"channel_id"`
-	AuthorID    string               `json:"author_id"`
-	Content     string               `json:"content"`
-	CreatedAt   time.Time            `json:"created_at"`
-	UpdatedAt   time.Time            `json:"updated_at"`
-	Username    string               `json:"username,omitempty"`
-	NickName    string               `json:"nickname,omitempty"`
-	Attachments []AttachmentResponse `json:"attachments,omitempty"`
-	Pinned      bool                 `json:"pinned"`
+    ID          uint                 `json:"id"`
+    ChannelID   uint                 `json:"channel_id"`
+    AuthorID    string               `json:"author_id"`
+    Content     string               `json:"content"`
+    CreatedAt   time.Time            `json:"created_at"`
+    UpdatedAt   time.Time            `json:"updated_at"`
+    Username    string               `json:"username,omitempty"`
+    NickName    string               `json:"nickname,omitempty"`
+    Attachments []AttachmentResponse `json:"attachments,omitempty"`
+    Pinned      bool                 `json:"pinned"`
+    TaggedUsers []TaggedUser         `json:"tagged_users,omitempty"`
+}
+
+func detectUserTags(content string) []string {
+    // Regex to match @username patterns (alphanumeric + underscore)
+    re := regexp.MustCompile(`@([a-zA-Z0-9_]+)`)
+    matches := re.FindAllStringSubmatch(content, -1)
+
+    usernames := make([]string, 0)
+    seen := make(map[string]bool) // Prevent duplicates
+
+    for _, match := range matches {
+        if len(match) > 1 {
+            username := match[1]
+            if !seen[username] {
+                usernames = append(usernames, username)
+                seen[username] = true
+            }
+        }
+    }
+
+    return usernames
+}
+
+// storeUserTags creates UserTag records for mentioned users
+func storeUserTags(messageID uint, channelID uint, taggerUserID string, taggedUsernames []string) []TaggedUser {
+    var taggedUsers []TaggedUser
+
+    // Look up users by username
+    user.Mu.RLock()
+    for _, username := range taggedUsernames {
+        for userID, userObj := range user.Users {
+            if userObj.Username == username {
+                // Don't tag yourself
+                if userID == taggerUserID {
+                    continue
+                }
+
+                // Create tag record
+                tag := channel.UserTag{
+                    MessageID:    messageID,
+                    TaggedUserID: userID,
+                    TaggerUserID: taggerUserID,
+                    ChannelID:    channelID,
+                    IsRead:       false,
+                }
+
+                if err := db.DB.Create(&tag).Error; err != nil {
+                    log.Printf("Failed to create user tag: %v", err)
+                    continue
+                }
+
+                taggedUsers = append(taggedUsers, TaggedUser{
+                    UserID:   userID,
+                    Username: userObj.Username,
+                    Nickname: userObj.Nickname,
+                })
+                break
+            }
+        }
+    }
+    user.Mu.RUnlock()
+
+    return taggedUsers
 }
 
 // SendMessageHandler handles sending messages to channels with optional attachments
@@ -174,19 +245,28 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	var taggedUsers []TaggedUser
+    if content != "" {
+        taggedUsernames := detectUserTags(content)
+        if len(taggedUsernames) > 0 {
+            taggedUsers = storeUserTags(message.ID, uint(channelID), userID, taggedUsernames)
+        }
+    }
+
 	// Create response with user information and attachments
 	response := MessageResponse{
-		ID:          message.ID,
-		ChannelID:   message.ChannelID,
-		AuthorID:    message.AuthorID,
-		Content:     message.Content,
-		CreatedAt:   message.CreatedAt,
-		UpdatedAt:   message.UpdatedAt,
-		Username:    userObj.Username,
-		NickName:    userObj.Nickname,
-		Attachments: attachmentResponses,
-		Pinned:      false, // New messages are not pinned by default
-	}
+        ID:          message.ID,
+        ChannelID:   message.ChannelID,
+        AuthorID:    message.AuthorID,
+        Content:     message.Content,
+        CreatedAt:   message.CreatedAt,
+        UpdatedAt:   message.UpdatedAt,
+        Username:    userObj.Username,
+        NickName:    userObj.Nickname,
+        Attachments: attachmentResponses,
+        Pinned:      false,
+        TaggedUsers: taggedUsers,
+    }
 
 	// Set headers before writing response
 	w.Header().Set("Content-Type", "application/json")
@@ -201,8 +281,21 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// Broadcast the message to all connected clients via WebSocket
 	// Do this after responding to avoid blocking the HTTP response
 	go func() {
-		websocket.GlobalHub.BroadcastMessage("new_message", response)
-	}()
+        // Broadcast to all users in channel
+        websocket.GlobalHub.BroadcastMessage("new_message", response)
+
+        // Send individual tag notifications to tagged users
+        for _, taggedUser := range taggedUsers {
+            websocket.GlobalHub.SendMessageToUser(taggedUser.UserID, "user_tagged", map[string]interface{}{
+                "message_id":    message.ID,
+                "channel_id":    message.ChannelID,
+                "tagger_id":     userID,
+                "tagger_username":   userObj.Username,
+                "tagger_nickname":   userObj.Nickname,
+                "tagged_at":     message.CreatedAt,
+            })
+        }
+    }()
 }
 
 // processAttachment handles file upload and creates attachment record
@@ -272,9 +365,6 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
 		MimeType:  mimeType,
 		FileHash:  fileHash,
 	}
-
-	// TODO: Generate thumbnail for images/videos if needed
-	// This would be implemented later with image processing libraries
 
 	return attachment, nil
 }

@@ -58,6 +58,7 @@ func main() {
         &channel.Message{},
 		&channel.Attachment{},
         &channel.ChannelPermission{},
+        &channel.UserTag{},
         &user.UserModel{},
         &user.InviteModel{},
         &user.RoleModel{},
@@ -93,6 +94,10 @@ func main() {
     authRoute(mux, "/user/nickname", middleware.GlobalRateLimit, NoCache, handlers.UpdateNicknameHandler)
     authRoute(mux, "/user/profile-picture", middleware.GlobalRateLimit, NoCache, handlers.UploadProfilePictureHandler)
     authRoute(mux, "/user/leave", middleware.GlobalRateLimit, NoCache, handlers.LeaveServerHandler)
+    authRoute(mux, "/user/tags", middleware.GlobalRateLimit, Cache5Min, handlers.GetUserTagsHandler)
+    authRoute(mux, "/user/tags/read", middleware.GlobalRateLimit, Cache5Min, handlers.MarkTagAsReadHandler)
+    authRoute(mux, "/user/tags/read-all", middleware.GlobalRateLimit, Cache5Min, handlers.MarkAllTagsAsReadHandler)
+    authRoute(mux, "/user/tags/unread-count", middleware.GlobalRateLimit, Cache5Min, handlers.GetUnreadTagCountHandler)
 
     // Role management endpoints
     permissionRoute(mux, "/roles", middleware.GlobalRateLimit, user.PermissionManageRoles, NoCache, handlers.CreateRoleHandler)

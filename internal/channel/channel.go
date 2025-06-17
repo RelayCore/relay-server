@@ -90,3 +90,14 @@ type VoiceParticipant struct {
 	JoinedAt    time.Time
 	VoiceRoom   VoiceRoom `gorm:"foreignKey:VoiceRoomID"`
 }
+
+type UserTag struct {
+    gorm.Model
+    MessageID    uint
+    TaggedUserID string    // ID of the user who was tagged
+    TaggerUserID string    // ID of the user who made the tag
+    ChannelID    uint
+    IsRead       bool      `gorm:"default:false"`
+    ReadAt       *time.Time
+    Message      Message   `gorm:"foreignKey:MessageID"`
+}

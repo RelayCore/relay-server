@@ -919,6 +919,30 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	 messageIDs := make([]uint, 0, len(messages))
+    for _, msg := range messages {
+        messageIDs = append(messageIDs, msg.ID)
+    }
+
+    var userTags []channel.UserTag
+    tagsByMessage := make(map[uint][]TaggedUser)
+    if len(messageIDs) > 0 {
+        if err := db.DB.Where("message_id IN ?", messageIDs).Find(&userTags).Error; err == nil {
+            // Group tags by message ID
+            for _, tag := range userTags {
+                user.Mu.RLock()
+                if taggedUser, exists := user.Users[tag.TaggedUserID]; exists {
+                    tagsByMessage[tag.MessageID] = append(tagsByMessage[tag.MessageID], TaggedUser{
+                        UserID:   tag.TaggedUserID,
+                        Username: taggedUser.Username,
+                        Nickname: taggedUser.Nickname,
+                    })
+                }
+                user.Mu.RUnlock()
+            }
+        }
+    }
+
 	// Get pinned message IDs for this channel
 	var pinnedMessageIDs []uint
 	db.DB.Table("channel_pins").Where("channel_id = ?", uint(channelID)).Pluck("message_id", &pinnedMessageIDs)
@@ -977,17 +1001,18 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		messageResponses = append(messageResponses, MessageResponse{
-			ID:          msg.ID,
-			ChannelID:   msg.ChannelID,
-			AuthorID:    msg.AuthorID,
-			Content:     msg.Content,
-			CreatedAt:   msg.CreatedAt,
-			UpdatedAt:   msg.UpdatedAt,
-			Username:    username,
-			NickName:    nickname,
-			Attachments: attachmentResponses,
-			Pinned:      pinnedMap[msg.ID], // Check if message is pinned
-		})
+            ID:          msg.ID,
+            ChannelID:   msg.ChannelID,
+            AuthorID:    msg.AuthorID,
+            Content:     msg.Content,
+            CreatedAt:   msg.CreatedAt,
+            UpdatedAt:   msg.UpdatedAt,
+            Username:    username,
+            NickName:    nickname,
+            Attachments: attachmentResponses,
+            Pinned:      pinnedMap[msg.ID],
+            TaggedUsers: tagsByMessage[msg.ID],
+        })
 	}
 
 	w.Header().Set("Content-Type", "application/json")
