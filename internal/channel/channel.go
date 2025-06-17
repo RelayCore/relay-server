@@ -15,11 +15,12 @@ const (
 
 type Channel struct {
 	gorm.Model
-	Name        string
-	Description string
-	GroupID     uint
-	Position    int // For ordering channels within a group
-	Type        ChannelType `gorm:"default:'text'"` // text or voice
+	Name          string
+	Description   string
+	GroupID       uint
+	Position      int
+	Type          ChannelType `gorm:"default:'text'"`
+	LastMessageAt *time.Time  `json:"last_message_at,omitempty"`
 	// Messages only exist for text channels - voice channels have no messages
 	Messages    []Message `gorm:"constraint:OnDelete:CASCADE;"`
 	Pinned      []Message `gorm:"many2many:channel_pins;constraint:OnDelete:CASCADE;"`

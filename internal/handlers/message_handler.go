@@ -138,6 +138,13 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update channel's last message timestamp
+	now := time.Now()
+	if err := db.DB.Model(&channel.Channel{}).Where("id = ?", channelID).Update("last_message_at", now).Error; err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Failed to update channel last_message_at: %v\n", err)
+	}
+
 	// Process attachments
 	var attachments []channel.Attachment
 	var attachmentResponses []AttachmentResponse
@@ -343,6 +350,16 @@ func DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update channel's last message timestamp to the most recent remaining message
+	var lastMessage channel.Message
+	if err := db.DB.Where("channel_id = ?", message.ChannelID).Order("created_at DESC").First(&lastMessage).Error; err != nil {
+		// No messages left, set last_message_at to nil
+		db.DB.Model(&channel.Channel{}).Where("id = ?", message.ChannelID).Update("last_message_at", nil)
+	} else {
+		// Update to the timestamp of the most recent remaining message
+		db.DB.Model(&channel.Channel{}).Where("id = ?", message.ChannelID).Update("last_message_at", lastMessage.CreatedAt)
+	}
+
 	// Create response
 	response := map[string]interface{}{
 		"message":    "Message deleted successfully",
@@ -421,6 +438,12 @@ func EditMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if err := db.DB.Save(&message).Error; err != nil {
 		http.Error(w, "Failed to update message", http.StatusInternalServerError)
 		return
+	}
+
+	// Update channel's last message timestamp when message is edited
+	if err := db.DB.Model(&channel.Channel{}).Where("id = ?", message.ChannelID).Update("last_message_at", message.UpdatedAt).Error; err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Failed to update channel last_message_at on edit: %v\n", err)
 	}
 
 	// Load attachments for the response

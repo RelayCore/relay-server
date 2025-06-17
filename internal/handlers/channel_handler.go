@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"relay-server/internal/channel"
 	"relay-server/internal/db"
@@ -15,29 +16,27 @@ import (
 	"gorm.io/gorm"
 )
 
-// ChannelResponse represents a channel with its group information
 type ChannelResponse struct {
-    ID           uint                        `json:"id"`
-    Name         string                      `json:"name"`
-    Description  string                      `json:"description"`
-    GroupID      uint                        `json:"group_id"`
-    GroupName    string                      `json:"group_name"`
-    Position     int                         `json:"position"`
-    Type         string                      `json:"type"` // "text" or "voice"
-    IsVoice      bool                        `json:"is_voice"`
-    VoiceRoomID  *uint                       `json:"voice_room_id,omitempty"`
-    Permissions  []ChannelPermissionResponse `json:"permissions"`
-    Participants []VoiceParticipantResponse  `json:"participants"`
+	ID            uint                        `json:"id"`
+	Name          string                      `json:"name"`
+	Description   string                      `json:"description"`
+	GroupID       uint                        `json:"group_id"`
+	GroupName     string                      `json:"group_name"`
+	Position      int                         `json:"position"`
+	Type          string                      `json:"type"` // "text" or "voice"
+	IsVoice       bool                        `json:"is_voice"`
+	VoiceRoomID   *uint                       `json:"voice_room_id,omitempty"`
+	LastMessageAt *time.Time                  `json:"last_message_at,omitempty"`
+	Permissions   []ChannelPermissionResponse `json:"permissions"`
+	Participants  []VoiceParticipantResponse  `json:"participants"`
 }
 
-// GroupResponse represents a group with its channels
 type GroupResponse struct {
 	ID       uint              `json:"id"`
 	Name     string            `json:"name"`
 	Channels []ChannelResponse `json:"channels"`
 }
 
-// ChannelPermissionResponse represents a channel permission with proper JSON field names
 type ChannelPermissionResponse struct {
 	ID         uint    `json:"id"`
 	ChannelID  uint    `json:"channel_id"`
@@ -51,7 +50,6 @@ type ChannelPermissionResponse struct {
 	UpdatedAt  string  `json:"updated_at"`
 }
 
-// GetChannelsHandler returns all channels organized by groups
 func GetChannelsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value("user_id").(string)
 	if userID == "" {
@@ -124,17 +122,18 @@ func GetChannelsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			channelResponses = append(channelResponses, ChannelResponse{
-				ID:          ch.ID,
-				Name:        ch.Name,
-				Description: ch.Description,
-				GroupID:     ch.GroupID,
-				GroupName:   group.Name,
-				Position:    ch.Position,
-				Type:        string(ch.Type),
-				IsVoice:     isVoice,
-				VoiceRoomID: voiceRoomID,
-				Permissions: permissionResponses,
-				Participants: participants,
+				ID:            ch.ID,
+				Name:          ch.Name,
+				Description:   ch.Description,
+				GroupID:       ch.GroupID,
+				GroupName:     group.Name,
+				Position:      ch.Position,
+				Type:          string(ch.Type),
+				IsVoice:       isVoice,
+				VoiceRoomID:   voiceRoomID,
+				LastMessageAt: ch.LastMessageAt,
+				Permissions:   permissionResponses,
+				Participants:  participants,
 			})
 		}
 
@@ -266,15 +265,16 @@ func CreateChannelHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	response := ChannelResponse{
-		ID:          ch.ID,
-		Name:        ch.Name,
-		Description: ch.Description,
-		GroupID:     ch.GroupID,
-		GroupName:   group.Name,
-		Position:    ch.Position,
-		Type:        string(ch.Type),
-		IsVoice:     req.IsVoice,
-		Permissions: []ChannelPermissionResponse{},
+		ID:            ch.ID,
+		Name:          ch.Name,
+		Description:   ch.Description,
+		GroupID:       ch.GroupID,
+		GroupName:     group.Name,
+		Position:      ch.Position,
+		Type:          string(ch.Type),
+		IsVoice:       req.IsVoice,
+		LastMessageAt: ch.LastMessageAt,
+		Permissions:   []ChannelPermissionResponse{},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
