@@ -56,6 +56,43 @@ func (r *RoleIDsType) Scan(value interface{}) error {
     return json.Unmarshal(bytes, r)
 }
 
+// LastOnlineType is a custom type for storing last online time
+type LastOnlineType time.Time
+
+func (t LastOnlineType) Value() (driver.Value, error) {
+    if time.Time(t).IsZero() {
+        return nil, nil
+    }
+    return time.Time(t), nil
+}
+
+func (t *LastOnlineType) Scan(value interface{}) error {
+    if value == nil {
+        *t = LastOnlineType(time.Time{})
+        return nil
+    }
+
+    switch v := value.(type) {
+    case time.Time:
+        *t = LastOnlineType(v)
+    case []byte:
+        parsedTime, err := time.Parse(time.RFC3339, string(v))
+        if err != nil {
+            return err
+        }
+        *t = LastOnlineType(parsedTime)
+    case string:
+        parsedTime, err := time.Parse(time.RFC3339, v)
+        if err != nil {
+            return err
+        }
+        *t = LastOnlineType(parsedTime)
+    default:
+        return fmt.Errorf("cannot scan %T into LastOnlineType", value)
+    }
+    return nil
+}
+
 // UserModel represents the database model for users
 type UserModel struct {
     gorm.Model
@@ -65,6 +102,7 @@ type UserModel struct {
     PublicKey          PublicKeyType
     RoleIDs            RoleIDsType
     ProfilePictureHash string
+    LastOnline         LastOnlineType
 }
 
 // InviteModel represents the database model for invites

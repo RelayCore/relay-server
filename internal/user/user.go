@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"log"
 	"relay-server/internal/db"
+	"time"
 )
 
 type User struct {
@@ -13,6 +14,7 @@ type User struct {
     RoleIDs            []string  // Changed from Roles to RoleIDs
     ID                 string
     ProfilePictureHash string    // Hash of the profile picture
+    LastOnline         time.Time // Last time the user was online
 }
 
 // GetRoles returns the actual Role objects for this user
@@ -96,6 +98,7 @@ func LoadUsersFromDB() {
             PublicKey:          ed25519.PublicKey(userModel.PublicKey),
             RoleIDs:            []string(userModel.RoleIDs),
             ProfilePictureHash: userModel.ProfilePictureHash,
+            LastOnline:         time.Time(userModel.LastOnline),
         }
     }
 
@@ -110,11 +113,29 @@ func SaveUserToDB(user *User) error {
         PublicKey:          PublicKeyType(user.PublicKey),
         RoleIDs:            RoleIDsType(user.RoleIDs),
         ProfilePictureHash: user.ProfilePictureHash,
+        LastOnline:         LastOnlineType(user.LastOnline),
     }
 
     return db.DB.Save(&userModel).Error
 }
 
+// UpdateLastOnline updates the user's last online time
+func UpdateLastOnline(userID string) {
+    Mu.Lock()
+    defer Mu.Unlock()
+
+    if user, exists := Users[userID]; exists {
+        user.LastOnline = time.Now()
+        // Save to database in background to avoid blocking
+        go func() {
+            if err := SaveUserToDB(user); err != nil {
+                log.Printf("Failed to update last online for user %s: %v", userID, err)
+            }
+        }()
+    }
+}
+
+// DeleteUserFromDB removes a user from the database
 func DeleteUserFromDB(userID string) error {
     return db.DB.Delete(&UserModel{}, "id = ?", userID).Error
 }

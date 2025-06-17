@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"relay-server/internal/user"
 	"relay-server/internal/util"
@@ -24,6 +25,7 @@ type UserResponse struct {
 	Roles             []*user.Role `json:"roles"`
 	IsOnline          bool        `json:"is_online"`
 	ProfilePictureURL string      `json:"profile_picture_url"`
+	LastOnline        *time.Time  `json:"last_online"`
 }
 
 // GetUsersHandler returns all users with their roles and online status
@@ -38,6 +40,11 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 			profileURL = util.GetProfilePictureURL(r, u.ID)
 		}
 
+		var lastOnline *time.Time
+		if !u.LastOnline.IsZero() {
+			lastOnline = &u.LastOnline
+		}
+
 		userResp := UserResponse{
 			ID:                u.ID,
 			Username:          u.Username,
@@ -45,6 +52,7 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 			Roles:             u.GetRoles(),
 			IsOnline:          websocket.GlobalHub.IsUserOnline(u.ID),
 			ProfilePictureURL: profileURL,
+			LastOnline:        lastOnline,
 		}
 		users = append(users, userResp)
 	}
@@ -78,6 +86,11 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 		profileURL = util.GetProfilePictureURL(r, u.ID)
 	}
 
+	var lastOnline *time.Time
+	if !u.LastOnline.IsZero() {
+		lastOnline = &u.LastOnline
+	}
+
 	userResp := UserResponse{
 		ID:                u.ID,
 		Username:          u.Username,
@@ -85,6 +98,7 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 		Roles:             u.GetRoles(),
 		IsOnline:          websocket.GlobalHub.IsUserOnline(u.ID),
 		ProfilePictureURL: profileURL,
+		LastOnline:        lastOnline,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -199,6 +213,11 @@ func UpdateNicknameHandler(w http.ResponseWriter, r *http.Request) {
 		profileURL = util.GetProfilePictureURL(r, targetUser.ID)
 	}
 
+	var lastOnline *time.Time
+	if !targetUser.LastOnline.IsZero() {
+		lastOnline = &targetUser.LastOnline
+	}
+
 	// Broadcast nickname update
 	go func() {
 		websocket.GlobalHub.BroadcastMessage("user_updated", map[string]interface{}{
@@ -217,6 +236,7 @@ func UpdateNicknameHandler(w http.ResponseWriter, r *http.Request) {
 			Roles:             targetUser.GetRoles(),
 			IsOnline:          websocket.GlobalHub.IsUserOnline(targetUser.ID),
 			ProfilePictureURL: profileURL,
+			LastOnline:        lastOnline,
 		},
 	})
 }
