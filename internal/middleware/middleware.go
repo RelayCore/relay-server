@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -151,16 +153,49 @@ func RequireMinimumRank(minRank int) func(http.HandlerFunc) http.HandlerFunc {
     }
 }
 
-// getUserFromAuth extracts user ID from Authorization header or query param
 func getUserFromAuth(r *http.Request) string {
+    var publicKeyB64 string
+
     // Try Authorization header first (Bearer token format)
     auth := r.Header.Get("Authorization")
     if auth != "" && strings.HasPrefix(auth, "Bearer ") {
-        return strings.TrimPrefix(auth, "Bearer ")
+        publicKeyB64 = strings.TrimPrefix(auth, "Bearer ")
+    } else {
+        // Fallback to query parameter
+        publicKeyB64 = r.URL.Query().Get("public_key")
     }
 
-    // Fallback to query parameter
-    return r.URL.Query().Get("user_id")
+    if publicKeyB64 == "" {
+        return ""
+    }
+
+    // Decode the base64 public key
+    publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKeyB64)
+    if err != nil {
+        // Try URL-safe base64 if standard fails
+        publicKeyBytes, err = base64.URLEncoding.DecodeString(publicKeyB64)
+        if err != nil {
+            return ""
+        }
+    }
+
+    if len(publicKeyBytes) != ed25519.PublicKeySize {
+        return ""
+    }
+
+    publicKey := ed25519.PublicKey(publicKeyBytes)
+
+    // Find user by public key
+    user.Mu.RLock()
+    defer user.Mu.RUnlock()
+
+    for userID, u := range user.Users {
+        if string(u.PublicKey) == string(publicKey) {
+            return userID
+        }
+    }
+
+    return ""
 }
 
 func NewRateLimiter(capacity int, refillRate time.Duration) *RateLimiter {
