@@ -1088,6 +1088,270 @@ func GetChannelMessagesHandler(w http.ResponseWriter, r *http.Request) {
     })
 }
 
+func GetMessagesAroundHandler(w http.ResponseWriter, r *http.Request) {
+    userID := r.Context().Value("user_id").(string)
+    if userID == "" {
+        http.Error(w, "User ID required", http.StatusUnauthorized)
+        return
+    }
+
+    channelIDStr := r.URL.Query().Get("channel_id")
+    if channelIDStr == "" {
+        http.Error(w, "Channel ID is required", http.StatusBadRequest)
+        return
+    }
+
+    messageIDStr := r.URL.Query().Get("message_id")
+    if messageIDStr == "" {
+        http.Error(w, "Message ID is required", http.StatusBadRequest)
+        return
+    }
+
+    channelID, err := strconv.ParseUint(channelIDStr, 10, 32)
+    if err != nil {
+        http.Error(w, "Invalid channel ID", http.StatusBadRequest)
+        return
+    }
+
+    messageID, err := strconv.ParseUint(messageIDStr, 10, 32)
+    if err != nil {
+        http.Error(w, "Invalid message ID", http.StatusBadRequest)
+        return
+    }
+
+    // Check if user can access this channel
+    if !channel.CanUserAccessChannel(userID, uint(channelID)) {
+        http.Error(w, "Insufficient permissions to access this channel", http.StatusForbidden)
+        return
+    }
+
+    // Verify channel exists and is a text channel
+    var ch channel.Channel
+    if err := db.DB.First(&ch, uint(channelID)).Error; err != nil {
+        http.Error(w, "Channel not found", http.StatusNotFound)
+        return
+    }
+
+    if ch.Type == channel.ChannelTypeVoice {
+        http.Error(w, "Cannot retrieve messages from voice channels", http.StatusBadRequest)
+        return
+    }
+
+    // Verify the target message exists in this channel
+    var targetMessage channel.Message
+    if err := db.DB.Where("id = ? AND channel_id = ?", uint(messageID), uint(channelID)).First(&targetMessage).Error; err != nil {
+        http.Error(w, "Message not found in this channel", http.StatusNotFound)
+        return
+    }
+
+    // Get limit from query params (default to 25 messages before and after, total 50)
+    limitStr := r.URL.Query().Get("limit")
+    limit := 25
+    if limitStr != "" {
+        if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 50 {
+            limit = parsedLimit
+        }
+    }
+
+    // Get messages before the target message
+    var messagesBefore []channel.Message
+    if err := db.DB.Preload("Attachments").
+        Where("channel_id = ? AND created_at < ?", uint(channelID), targetMessage.CreatedAt).
+        Order("created_at DESC").
+        Limit(limit).
+        Find(&messagesBefore).Error; err != nil {
+        http.Error(w, "Failed to fetch messages before target", http.StatusInternalServerError)
+        return
+    }
+
+    // Get messages after the target message
+    var messagesAfter []channel.Message
+    if err := db.DB.Preload("Attachments").
+        Where("channel_id = ? AND created_at > ?", uint(channelID), targetMessage.CreatedAt).
+        Order("created_at ASC").
+        Limit(limit).
+        Find(&messagesAfter).Error; err != nil {
+        http.Error(w, "Failed to fetch messages after target", http.StatusInternalServerError)
+        return
+    }
+
+    // Load the target message with attachments
+    if err := db.DB.Preload("Attachments").First(&targetMessage, uint(messageID)).Error; err != nil {
+        http.Error(w, "Failed to reload target message", http.StatusInternalServerError)
+        return
+    }
+
+    // Combine all messages in chronological order
+    allMessages := make([]channel.Message, 0, len(messagesBefore)+1+len(messagesAfter))
+
+    // Add messages before (reverse order since we queried DESC)
+    for i := len(messagesBefore) - 1; i >= 0; i-- {
+        allMessages = append(allMessages, messagesBefore[i])
+    }
+
+    // Add target message
+    allMessages = append(allMessages, targetMessage)
+
+    // Add messages after
+    allMessages = append(allMessages, messagesAfter...)
+
+    // Get all message IDs for additional data
+    messageIDs := make([]uint, 0, len(allMessages))
+    for _, msg := range allMessages {
+        messageIDs = append(messageIDs, msg.ID)
+    }
+
+    // Get user tags
+    var userTags []channel.UserTag
+    tagsByMessage := make(map[uint][]TaggedUser)
+    if len(messageIDs) > 0 {
+        if err := db.DB.Where("message_id IN ?", messageIDs).Find(&userTags).Error; err == nil {
+            for _, tag := range userTags {
+                user.Mu.RLock()
+                if taggedUser, exists := user.Users[tag.TaggedUserID]; exists {
+                    tagsByMessage[tag.MessageID] = append(tagsByMessage[tag.MessageID], TaggedUser{
+                        UserID:   tag.TaggedUserID,
+                        Username: taggedUser.Username,
+                        Nickname: taggedUser.Nickname,
+                    })
+                }
+                user.Mu.RUnlock()
+            }
+        }
+    }
+
+    // Get pinned message IDs
+    var pinnedMessageIDs []uint
+    db.DB.Table("channel_pins").Where("channel_id = ?", uint(channelID)).Pluck("message_id", &pinnedMessageIDs)
+
+    pinnedMap := make(map[uint]bool)
+    for _, id := range pinnedMessageIDs {
+        pinnedMap[id] = true
+    }
+
+    // Get reply-to messages
+    replyToMessageIDs := make([]uint, 0)
+    for _, msg := range allMessages {
+        if msg.ReplyToMessageID != nil {
+            replyToMessageIDs = append(replyToMessageIDs, *msg.ReplyToMessageID)
+        }
+    }
+
+    replyToMessages := make(map[uint]channel.Message)
+    if len(replyToMessageIDs) > 0 {
+        var replyMessages []channel.Message
+        if err := db.DB.Where("id IN ?", replyToMessageIDs).Find(&replyMessages).Error; err == nil {
+            for _, replyMsg := range replyMessages {
+                replyToMessages[replyMsg.ID] = replyMsg
+            }
+        }
+    }
+
+    // Get reply counts
+    replyCounts := make(map[uint]int64)
+    if len(messageIDs) > 0 {
+        var replyCountResults []struct {
+            ReplyToMessageID uint
+            Count            int64
+        }
+        db.DB.Model(&channel.Message{}).
+            Select("reply_to_message_id, COUNT(*) as count").
+            Where("reply_to_message_id IN ?", messageIDs).
+            Group("reply_to_message_id").
+            Scan(&replyCountResults)
+
+        for _, result := range replyCountResults {
+            replyCounts[result.ReplyToMessageID] = result.Count
+        }
+    }
+
+    // Build response
+    messageResponses := make([]MessageResponse, 0, len(allMessages))
+    for _, msg := range allMessages {
+        // Get user information
+        user.Mu.RLock()
+        userObj, exists := user.Users[msg.AuthorID]
+        user.Mu.RUnlock()
+
+        var username, nickname string
+        if exists {
+            username = userObj.Username
+            nickname = userObj.Nickname
+        }
+
+        // Process attachments
+        attachmentResponses := make([]AttachmentResponse, 0, len(msg.Attachments))
+        for _, att := range msg.Attachments {
+            filePath := att.FilePath
+            if filePath != "" && filePath[0] == '/' {
+                filePath = util.GetFullURL(r, filePath)
+            } else if filePath != "" {
+                filePath = util.GetFullURL(r, filePath)
+            }
+
+            attachmentResponses = append(attachmentResponses, AttachmentResponse{
+                ID:            att.ID,
+                Type:          att.Type,
+                FileName:      att.FileName,
+                FileSize:      att.FileSize,
+                FilePath:      filePath,
+                MimeType:      att.MimeType,
+            })
+        }
+
+        // Prepare reply information
+        var replyToResponse *ReplyToMessageResponse
+        if msg.ReplyToMessageID != nil {
+            if replyToMsg, exists := replyToMessages[*msg.ReplyToMessageID]; exists {
+                user.Mu.RLock()
+                replyAuthor, replyExists := user.Users[replyToMsg.AuthorID]
+                user.Mu.RUnlock()
+
+                var replyUsername, replyNickname string
+                if replyExists {
+                    replyUsername = replyAuthor.Username
+                    replyNickname = replyAuthor.Nickname
+                }
+
+                replyToResponse = &ReplyToMessageResponse{
+                    ID:        replyToMsg.ID,
+                    AuthorID:  replyToMsg.AuthorID,
+                    Content:   replyToMsg.Content,
+                    CreatedAt: replyToMsg.CreatedAt,
+                    Username:  replyUsername,
+                    NickName:  replyNickname,
+                }
+            }
+        }
+
+        messageResponses = append(messageResponses, MessageResponse{
+            ID:               msg.ID,
+            ChannelID:        msg.ChannelID,
+            AuthorID:         msg.AuthorID,
+            Content:          msg.Content,
+            CreatedAt:        msg.CreatedAt,
+            UpdatedAt:        msg.UpdatedAt,
+            Username:         username,
+            NickName:         nickname,
+            Attachments:      attachmentResponses,
+            Pinned:           pinnedMap[msg.ID],
+            TaggedUsers:      tagsByMessage[msg.ID],
+            ReplyToMessageID: msg.ReplyToMessageID,
+            ReplyToMessage:   replyToResponse,
+            ReplyCount:       int(replyCounts[msg.ID]),
+        })
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "messages":       messageResponses,
+        "target_message": uint(messageID),
+        "count":          len(messageResponses),
+        "messages_before": len(messagesBefore),
+        "messages_after":  len(messagesAfter),
+    })
+}
+
 func GetAllAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
     // Get query parameters
     limitStr := r.URL.Query().Get("limit")

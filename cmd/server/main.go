@@ -115,6 +115,7 @@ func main() {
     permissionRoute(mux, "/channels/update", middleware.GlobalRateLimit, user.PermissionManageChannels, NoCache, handlers.UpdateChannelHandler)
     permissionRoute(mux, "/channels/delete", middleware.GlobalRateLimit, user.PermissionManageChannels, NoCache, handlers.DeleteChannelHandler)
     authRoute(mux, "/channels/messages", middleware.GlobalRateLimit, Cache30Sec, handlers.GetChannelMessagesHandler)
+    authRoute(mux, "/channels/messages/around", middleware.GlobalRateLimit, Cache30Sec, handlers.GetMessagesAroundHandler)
     authRoute(mux, "/attachments", middleware.GlobalRateLimit, Cache1Min, handlers.GetAllAttachmentsHandler)
     authRoute(mux, "/attachments/stats", middleware.GlobalRateLimit, Cache5Min, handlers.GetAttachmentStatsHandler)
 
