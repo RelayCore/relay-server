@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"relay-server/internal/config"
 	"strconv"
 	"strings"
@@ -56,14 +57,36 @@ func NewClient() *Client {
         return nil // Return nil if no API key is configured
     }
 
+    // Simplify server name using regex
+    serverName := simplifyServerName(config.Conf.Name)
+    clientKey := fmt.Sprintf("relay-server-%s", serverName)
+
     return &Client{
         APIKey:    apiKey,
         BaseURL:   "https://tenor.googleapis.com/v2",
-        ClientKey: "relay-server",
+        ClientKey: clientKey,
         HTTPClient: &http.Client{
             Timeout: 10 * time.Second,
         },
     }
+}
+
+func simplifyServerName(name string) string {
+    if name == "" {
+        return "default"
+    }
+
+    simplified := strings.ToLower(name)
+    reg := regexp.MustCompile(`[^a-z0-9]+`)
+    simplified = reg.ReplaceAllString(simplified, "-")
+    simplified = strings.Trim(simplified, "-")
+
+    // If empty after cleanup, use default
+    if simplified == "" {
+        return "default"
+    }
+
+    return simplified
 }
 
 // SearchOptions represents options for searching GIFs
