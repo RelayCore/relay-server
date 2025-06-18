@@ -11,9 +11,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relay-server/internal/user"
+)
+
+var (
+    TotalBytesOut int64
+    TotalRequests int64
 )
 
 type RateLimiter struct {
@@ -22,6 +28,46 @@ type RateLimiter struct {
     refillRate time.Duration
     lastRefill time.Time
     mutex     sync.Mutex
+}
+
+type ResponseWriter struct {
+    http.ResponseWriter
+    bytesWritten int64
+    statusCode   int
+}
+
+func (rw *ResponseWriter) Write(b []byte) (int, error) {
+    n, err := rw.ResponseWriter.Write(b)
+    atomic.AddInt64(&rw.bytesWritten, int64(n))
+    return n, err
+}
+
+func (rw *ResponseWriter) WriteHeader(statusCode int) {
+    rw.statusCode = statusCode
+    rw.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (rw *ResponseWriter) BytesWritten() int64 {
+    return atomic.LoadInt64(&rw.bytesWritten)
+}
+
+func TrackOutboundData(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        rw := &ResponseWriter{ResponseWriter: w, statusCode: 200}
+
+        start := time.Now()
+        next.ServeHTTP(rw, r)
+        duration := time.Since(start)
+
+        bytesWritten := rw.BytesWritten()
+        atomic.AddInt64(&TotalBytesOut, bytesWritten)
+        atomic.AddInt64(&TotalRequests, 1)
+
+        if bytesWritten > 0 {
+            log.Printf("HTTP %s %s - %d bytes - %d status - %v duration",
+                r.Method, r.URL.Path, bytesWritten, rw.statusCode, duration)
+        }
+    }
 }
 
 func GetClientName(r *http.Request) string {

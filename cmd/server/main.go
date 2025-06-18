@@ -6,12 +6,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"relay-server/internal/middleware"
 	"strings"
+	"syscall"
 	"time"
 
 	"relay-server/internal/channel"
 	"relay-server/internal/db"
+	"relay-server/internal/metrics"
 	"relay-server/internal/websocket"
 
 	"relay-server/internal/config"
@@ -32,15 +36,15 @@ var (
 )
 
 func publicRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, false)(cacheMiddleware(handler)))
+    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, false)(cacheMiddleware(middleware.TrackOutboundData(handler))))
 }
 
 func authRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequireAuth(handler))))
+    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequireAuth(middleware.TrackOutboundData(handler)))))
 }
 
 func permissionRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, permission user.Permission, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequirePermission(permission)(handler))))
+    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequirePermission(permission)(middleware.TrackOutboundData(handler)))))
 }
 
 func main() {
@@ -63,13 +67,29 @@ func main() {
         &user.InviteModel{},
         &user.RoleModel{},
         &user.Ban{},
+        &metrics.MetricsSnapshot{},
+        &metrics.MetricsHourly{},
     )
+
+    metricsService := metrics.NewMetricsService()
+    handlers.MetricsService = metricsService
+    metricsService.Start()
 
     user.LoadUsersFromDB()
     user.LoadInvitesFromDB()
     user.Roles.LoadRolesFromDB()
     user.LoadBansFromDB()
     createDefaultChannelIfNeeded()
+
+    // Graceful shutdown
+    c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+    go func() {
+        <-c
+        log.Println("Shutting down server...")
+        metricsService.Stop()
+        os.Exit(0)
+    }()
 
     go websocket.GlobalHub.Run()
 
@@ -82,6 +102,7 @@ func main() {
 
     // Technical metadata endpoint
     authRoute(mux, "/server/tech", middleware.GlobalRateLimit, Cache5Min, handlers.GetTechnicalMetadataHandler)
+    authRoute(mux, "/server/metrics", middleware.GlobalRateLimit, Cache5Min, handlers.GetMetricsHandler)
 
     // Static file serving for uploads
     mux.Handle("/uploads/", middleware.CacheControl(24*time.Hour, "public")(http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads/"))).ServeHTTP))

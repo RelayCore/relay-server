@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relay-server/internal/metrics"
 	"relay-server/internal/middleware"
 	"relay-server/internal/user"
 	"relay-server/internal/voice"
@@ -284,6 +285,9 @@ func (h *Hub) BroadcastMessage(messageType string, data interface{}) {
 	log.Printf("Broadcasting %s to %d clients", messageType, len(h.clients))
 	h.mu.RUnlock()
 
+	atomic.AddInt64(&metrics.WebSocketBytesOut, int64(len(jsonData)))
+	atomic.AddInt64(&metrics.WebSocketMessages, 1)
+
 	h.broadcast <- jsonData
 }
 
@@ -308,6 +312,9 @@ func (h *Hub) SendMessageToUser(userID string, messageType string, data interfac
 				log.Printf("Error marshaling message to user %s: %v", userID, err)
 				return
 			}
+
+			atomic.AddInt64(&metrics.WebSocketBytesOut, int64(len(jsonData)))
+			atomic.AddInt64(&metrics.WebSocketMessages, 1)
 
 			select {
 			case client.Send <- jsonData:
