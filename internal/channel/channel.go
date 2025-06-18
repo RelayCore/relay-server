@@ -48,6 +48,10 @@ type Message struct {
 	AuthorID  string // link to user.ID
 	Content   string // Text content (can be empty if only attachments)
 
+	ReplyToMessageID *uint    `json:"reply_to_message_id,omitempty"` // ID of the message being replied to
+    ReplyToMessage   *Message `gorm:"foreignKey:ReplyToMessageID" json:"reply_to_message,omitempty"` // The message being replied to
+    Replies          []Message `gorm:"foreignKey:ReplyToMessageID" json:"replies,omitempty"` // Messages that reply to this one
+
 	// Attachments - each message can have multiple files
 	Attachments []Attachment `gorm:"foreignKey:MessageID"`
 }
