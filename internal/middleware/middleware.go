@@ -24,10 +24,60 @@ type RateLimiter struct {
     mutex     sync.Mutex
 }
 
+func GetClientName(r *http.Request) string {
+    return r.Header.Get("X-Client-Name")
+}
+
+func GetClientVersion(r *http.Request) string {
+    return r.Header.Get("X-Client-Version")
+}
+
+func GetClientPlatform(r *http.Request) string {
+    return r.Header.Get("X-Client-Platform")
+}
+
+func GetClientTimestamp(r *http.Request) string {
+    return r.Header.Get("X-Client-Timestamp")
+}
+
+func GetClientMetadata(r *http.Request) map[string]string {
+    return map[string]string{
+        "name":      GetClientName(r),
+        "version":   GetClientVersion(r),
+        "platform":  GetClientPlatform(r),
+        "timestamp": GetClientTimestamp(r),
+    }
+}
+
+func GetClientInfo(r *http.Request) string {
+    platform := GetClientPlatform(r)
+    version := GetClientVersion(r)
+
+    if platform == "" && version == "" {
+        return ""
+    }
+
+    var parts []string
+    if platform != "" {
+        parts = append(parts, platform)
+    }
+    if version != "" {
+        parts = append(parts, version)
+    }
+
+    return strings.Join(parts, "/")
+}
+
 func CORS(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if (r.Method != "OPTIONS") {
-            log.Printf("%s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+            logMsg := fmt.Sprintf("%s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+
+            if clientInfo := GetClientInfo(r); clientInfo != "" {
+                logMsg += fmt.Sprintf(" [%s]", clientInfo)
+            }
+
+            log.Print(logMsg)
         }
 
         clientIP := GetClientIP(r)
@@ -44,7 +94,7 @@ func CORS(next http.Handler) http.Handler {
 
         w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Client-Name, X-Client-Version, X-Client-Platform, X-Client-Timestamp")
 
         // Handle preflight OPTIONS requests
         if r.Method == http.MethodOptions {
