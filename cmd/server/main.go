@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -264,6 +265,17 @@ func logServerConnectionInfo() {
                 }
             }
         }
+    }
+
+    // Public IP (external)
+    resp, err := http.Get("https://api.ipify.org")
+    if err == nil {
+        defer resp.Body.Close()
+        body, _ := io.ReadAll(resp.Body)
+        log.Printf("Public (external) address:")
+        log.Printf("   • http://%s:%s", strings.TrimSpace(string(body)), port)
+    } else {
+        log.Printf("   ⚠️  Could not determine public IP: %v", err)
     }
 
     log.Printf("═══════════════════════════════════════════════════════════════")
