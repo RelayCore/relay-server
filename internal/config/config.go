@@ -70,9 +70,6 @@ func LoadConfig(path string) {
 		Conf.MaxAttachments = 10
 	}
 
-	// Convert MB to bytes for internal use
-	Conf.MaxFileSize = Conf.MaxFileSize * 1024 * 1024
-
 	// Set default port if not specified
 	if Conf.Port == "" {
 		Conf.Port = ":36954"
