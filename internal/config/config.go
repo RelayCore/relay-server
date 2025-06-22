@@ -12,10 +12,10 @@ type ServerConfig struct {
 	Description    string `yaml:"description"`
 	AllowInvite    bool   `yaml:"allow_invite"`
 	MaxUsers       int    `yaml:"max_users"`
-	MaxFileSize    int64  `yaml:"max_file_size"`    // Max file size in MB
-	MaxAttachments int    `yaml:"max_attachments"`  // Max number of attachments per message
+	MaxFileSize    int64  `yaml:"max_file_size"`    // Max file size in bytes
+	MaxAttachments int    `yaml:"max_attachments"`
 	Icon           string `yaml:"icon,omitempty"`
-	Port           string `yaml:"port,omitempty"`   // Server port, e.g. ":8080"
+	Port           string `yaml:"port,omitempty"`
 	TenorAPIKey    string `yaml:"tenor_api_key,omitempty"`
 }
 
@@ -31,7 +31,7 @@ func CreateDefaultConfig(path string) error {
 		MaxFileSize:    52428800,
 		MaxAttachments: 10,
 		Icon:           "",
-		Port:           ":8080",
+		Port:           ":36954",
 		TenorAPIKey:    "",
 	}
 
@@ -75,7 +75,7 @@ func LoadConfig(path string) {
 
 	// Set default port if not specified
 	if Conf.Port == "" {
-		Conf.Port = ":8080"
+		Conf.Port = ":36954"
 	}
 }
 

@@ -240,7 +240,7 @@ func createDefaultChannelIfNeeded() {
 func logServerConnectionInfo() {
     port := strings.TrimPrefix(config.Conf.Port, ":")
     if port == "" {
-        port = "8080" // default fallback
+        port = "36954" // default fallback
     }
 
     log.Printf("═══════════════════════════════════════════════════════════════")
