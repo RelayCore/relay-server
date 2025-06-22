@@ -122,11 +122,6 @@ func (ms *MetricsService) saveSnapshot() {
         log.Printf("Error saving metrics snapshot: %v", err)
         return
     }
-
-    log.Printf("Metrics snapshot saved - HTTP: %d bytes (%d reqs), WS: %d bytes (%d msgs), Clients: %d",
-        snapshot.HTTPBytesOut, snapshot.HTTPRequests,
-        snapshot.WebSocketBytesOut, snapshot.WebSocketMessages,
-        snapshot.ConnectedClients)
 }
 
 func (ms *MetricsService) aggregateHourlyMetrics() {
