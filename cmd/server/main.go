@@ -36,14 +36,17 @@ var (
     CacheImmutable = middleware.CacheControl(365*24*time.Hour, "immutable")
 )
 
+// Fully public
 func publicRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
     mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, false)(cacheMiddleware(middleware.TrackOutboundData(handler))))
 }
 
+// Require bearer token authentication
 func authRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
     mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequireAuth(middleware.TrackOutboundData(handler)))))
 }
 
+// Require specific user permissions and bearer token authentication
 func permissionRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, permission user.Permission, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
     mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequirePermission(permission)(middleware.TrackOutboundData(handler)))))
 }
