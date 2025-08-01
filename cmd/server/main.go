@@ -198,6 +198,18 @@ func main() {
     }()
 
     logServerConnectionInfo()
+
+    certFile := "cert.pem"
+    keyFile := "key.pem"
+
+    if _, errCert := os.Stat(certFile); errCert == nil {
+        if _, errKey := os.Stat(keyFile); errKey == nil {
+            log.Printf("Starting HTTPS server on %s", config.Conf.Port)
+            log.Fatal(http.ListenAndServeTLS(config.Conf.Port, certFile, keyFile, middleware.CORS(mux)))
+        }
+    }
+
+    log.Printf("WARNING: TLS certificate or key not found. Starting HTTP server on %s. This is INSECURE and should only be used for development or testing.", config.Conf.Port)
     log.Fatal(http.ListenAndServe(config.Conf.Port, middleware.CORS(mux)))
 }
 
