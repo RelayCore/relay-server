@@ -264,6 +264,19 @@ func logServerConnectionInfo() {
     log.Printf("   • http://localhost:%s", port)
     log.Printf("   • http://127.0.0.1:%s", port)
 
+    if config.Conf.Domain != "" {
+        scheme := "http"
+        certFile := "cert.pem"
+        keyFile := "key.pem"
+        if _, errCert := os.Stat(certFile); errCert == nil {
+            if _, errKey := os.Stat(keyFile); errKey == nil {
+                scheme = "https"
+            }
+        }
+        log.Printf("Domain connection:")
+        log.Printf("   • %s://%s", scheme, config.Conf.Domain)
+    }
+
     // Network interfaces
     log.Printf("Network connections:")
     addrs, err := net.InterfaceAddrs()

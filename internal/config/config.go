@@ -12,11 +12,12 @@ type ServerConfig struct {
 	Description    string `yaml:"description"`
 	AllowInvite    bool   `yaml:"allow_invite"`
 	MaxUsers       int    `yaml:"max_users"`
-	MaxFileSize    int64  `yaml:"max_file_size"`    // Max file size in bytes
+	MaxFileSize    int64  `yaml:"max_file_size"`
 	MaxAttachments int    `yaml:"max_attachments"`
 	Icon           string `yaml:"icon,omitempty"`
 	Port           string `yaml:"port,omitempty"`
 	TenorAPIKey    string `yaml:"tenor_api_key,omitempty"`
+	Domain         string `yaml:"domain,omitempty"`
 }
 
 var Conf ServerConfig
@@ -33,6 +34,7 @@ func CreateDefaultConfig(path string) error {
 		Icon:           "",
 		Port:           ":36954",
 		TenorAPIKey:    "",
+		Domain:         "",
 	}
 
 	data, err := yaml.Marshal(&defaultConfig)

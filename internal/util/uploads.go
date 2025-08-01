@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"relay-server/internal/config"
 )
 
 func GetFullURL(r *http.Request, path string) string {
@@ -17,7 +19,12 @@ func GetFullURL(r *http.Request, path string) string {
 		path = "/" + path
 	}
 
-	return fmt.Sprintf("%s://%s%s", scheme, r.Host, path)
+	host := r.Host
+    if config.Conf.Domain != "" {
+        host = config.Conf.Domain
+    }
+
+	return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
 
 func GetProfilePictureURL(r *http.Request, userID string) string {
