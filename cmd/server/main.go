@@ -205,15 +205,24 @@ func main() {
     certFile := "cert.pem"
     keyFile := "key.pem"
 
+    srv := &http.Server{
+        Addr:         config.Conf.Port,
+        Handler:      middleware.CORS(mux),
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 10 * time.Second,
+        IdleTimeout:  60 * time.Second,
+        MaxHeaderBytes: 1 << 20, // 1 MB
+    }
+
     if _, errCert := os.Stat(certFile); errCert == nil {
         if _, errKey := os.Stat(keyFile); errKey == nil {
             log.Printf("Starting HTTPS server on %s", config.Conf.Port)
-            log.Fatal(http.ListenAndServeTLS(config.Conf.Port, certFile, keyFile, middleware.CORS(mux)))
+            log.Fatal(srv.ListenAndServeTLS(certFile, keyFile))
         }
     }
 
     log.Printf("WARNING: TLS certificate or key not found. Starting HTTP server on %s. This is INSECURE and should only be used for development or testing.", config.Conf.Port)
-    log.Fatal(http.ListenAndServe(config.Conf.Port, middleware.CORS(mux)))
+    log.Fatal(srv.ListenAndServe())
 }
 
 func createDefaultChannelIfNeeded() {
