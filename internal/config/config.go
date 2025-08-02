@@ -61,10 +61,11 @@ func LoadConfig(path string) {
 		panic(err)
 	}
 	yaml.Unmarshal(f, &Conf)
+	log.Printf("Loaded config: %+v", Conf)
 
 	// Set default max file size if not specified (50MB)
 	if Conf.MaxFileSize == 0 {
-		Conf.MaxFileSize = 50
+		Conf.MaxFileSize = 52428800
 	}
 
 	// Set default max attachments if not specified
@@ -80,9 +81,7 @@ func LoadConfig(path string) {
 
 // SaveConfig saves the current configuration to file
 func SaveConfig(path string) error {
-	// Create a copy of the config with file size in MB for saving
 	configCopy := Conf
-	configCopy.MaxFileSize = configCopy.MaxFileSize / (1024 * 1024)
 
 	data, err := yaml.Marshal(&configCopy)
 	if err != nil {

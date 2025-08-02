@@ -28,10 +28,6 @@ type ServerMetadataResponse struct {
 
 // GetServerMetadataHandler returns server metadata information
 func GetServerMetadataHandler(w http.ResponseWriter, r *http.Request) {
-	// Convert bytes back to MB for the response
-	maxFileSizeMB := config.Conf.MaxFileSize / (1024 * 1024)
-
-	// Set icon path to the full URL if icon exists, empty if not
 	iconPath := ""
 	if config.Conf.Icon != "" {
 		// Check if icon file actually exists
@@ -52,7 +48,7 @@ func GetServerMetadataHandler(w http.ResponseWriter, r *http.Request) {
 		AllowInvite:    config.Conf.AllowInvite,
 		MaxUsers:       config.Conf.MaxUsers,
 		CurrentUsers:   currentUsers,
-		MaxFileSize:    maxFileSizeMB,
+		MaxFileSize:    config.Conf.MaxFileSize,
 		MaxAttachments: config.Conf.MaxAttachments,
 		Icon:           iconPath,
 		TenorEnabled:   config.Conf.TenorAPIKey != "",
@@ -270,7 +266,7 @@ type UpdateServerConfigRequest struct {
 	Description    *string `json:"description,omitempty"`
 	AllowInvite    *bool   `json:"allow_invite,omitempty"`
 	MaxUsers       *int    `json:"max_users,omitempty"`
-	MaxFileSize    *int64  `json:"max_file_size,omitempty"`    // In MB
+	MaxFileSize    *int64  `json:"max_file_size,omitempty"`    // In Bytes
 	MaxAttachments *int    `json:"max_attachments,omitempty"`
 	TenorEnabled   *bool   `json:"tenor_enabled,omitempty"`
 }
@@ -338,14 +334,13 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return updated configuration
-	maxFileSizeMB := config.Conf.MaxFileSize / (1024 * 1024)
 	response := map[string]interface{}{
 		"message":         "Server configuration updated successfully",
 		"name":            config.Conf.Name,
 		"description":     config.Conf.Description,
 		"allow_invite":    config.Conf.AllowInvite,
 		"max_users":       config.Conf.MaxUsers,
-		"max_file_size":   maxFileSizeMB,
+		"max_file_size":   config.Conf.MaxFileSize,
 		"max_attachments": config.Conf.MaxAttachments,
 		"tenor_enabled":   config.Conf.TenorAPIKey != "",
 	}
@@ -358,7 +353,7 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 			"allow_invite":    config.Conf.AllowInvite,
 			"max_users":       config.Conf.MaxUsers,
 			"max_attachments": config.Conf.MaxAttachments,
-			"max_file_size":   maxFileSizeMB,
+			"max_file_size":   config.Conf.MaxFileSize,
 			"tenor_enabled":   config.Conf.TenorAPIKey != "",
 		})
 	}()

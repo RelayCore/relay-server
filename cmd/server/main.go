@@ -102,7 +102,7 @@ func main() {
     // Public endpoints
     publicRoute(mux, "/join", middleware.AuthRateLimit, NoCache, handlers.JoinRequestHandler)
     publicRoute(mux, "/auth", middleware.AuthRateLimit, NoCache, handlers.AuthChallengeHandler)
-    publicRoute(mux, "/server", middleware.GlobalRateLimit, Cache1Hour, handlers.GetServerMetadataHandler)
+    publicRoute(mux, "/server", middleware.GlobalRateLimit, Cache10Min, handlers.GetServerMetadataHandler)
 
     // Technical metadata endpoint
     authRoute(mux, "/server/tech", middleware.GlobalRateLimit, Cache5Min, handlers.GetTechnicalMetadataHandler)
