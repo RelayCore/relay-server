@@ -12,6 +12,16 @@ services:
         expose:
             - "36954"
 
+    certbot:
+        image: certbot/certbot
+        profiles: ["letsencrypt"]
+        volumes:
+            - ./certs:/etc/letsencrypt
+            - ./nginx/www:/var/www/certbot
+        entrypoint: /bin/sh -c
+        command: >
+            "trap exit TERM; while :; do sleep 6h & wait $${!}; certbot renew --webroot -w /var/www/certbot; done"
+
     nginx:
         image: nginx:1.25-alpine
         depends_on:
@@ -19,6 +29,38 @@ services:
         ports:
             - "443:443"
             - "80:80"
+        profiles: ["local"]
         volumes:
-            - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-            - ./certs:/etc/nginx/certs:ro
+            - ./nginx/nginx.conf.local.template:/etc/nginx/nginx.conf:ro
+        entrypoint: nginx -g "daemon off;"
+
+    nginx-letsencrypt:
+        image: nginx:1.25-alpine
+        depends_on:
+            - relay-server
+        profiles: ["letsencrypt"]
+        ports:
+            - "443:443"
+            - "80:80"
+        environment:
+            - DOMAIN
+        volumes:
+            - ./nginx/nginx.conf.letsencrypt.template:/etc/nginx/nginx.conf:ro
+            - ./certs:/etc/letsencrypt:ro
+            - ./nginx/www:/var/www/certbot
+        entrypoint: nginx -g "daemon off;"
+
+    nginx-selfsigned:
+        image: nginx:1.25-alpine
+        depends_on:
+            - relay-server
+        profiles: ["selfsigned"]
+        ports:
+            - "443:443"
+            - "80:80"
+        environment:
+            - DOMAIN
+        volumes:
+            - ./nginx/nginx.conf.selfsigned.template:/etc/nginx/nginx.conf:ro
+            - ./nginx/selfsigned:/etc/nginx/selfsigned:ro
+        entrypoint: nginx -g "daemon off;"

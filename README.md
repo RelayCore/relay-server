@@ -33,6 +33,34 @@ Relay Server is a real-time communication server designed for group chat, file s
     - By default, the server runs on port `36954`.
     - Visit `http://localhost:36954` or `https://localhost:36954` in your browser.
 
+## Docker Compose Profiles
+
+Relay Server uses Docker Compose profiles to select how the server is run and which Nginx configuration is used:
+
+-   **local**: Runs the server without SSL, using a local Nginx configuration.
+    Start with:
+
+    ```sh
+    docker-compose --profile local up --build
+    ```
+
+-   **letsencrypt**: Enables Let's Encrypt SSL certificates for HTTPS.
+    Requires the `DOMAIN` environment variable to be set.
+    Start with:
+
+    ```sh
+    DOMAIN=your.domain.com docker-compose --profile letsencrypt up --build
+    ```
+
+-   **selfsigned**: Uses self-signed SSL certificates for HTTPS.
+    Place your self-signed certificates in the `nginx/selfsigned` directory.
+    Start with:
+    ```sh
+    docker-compose --profile selfsigned up --build
+    ```
+
+If no profile is specified, the default is to run without SSL.
+
 ## Configuration
 
 The server is configured via `config.yaml`. Example options:
