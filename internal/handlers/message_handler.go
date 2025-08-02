@@ -273,12 +273,13 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
         }
 
         attachments = append(attachments, *attachment)
+		fullFilePath := util.GetFullURL(r, attachment.FilePath)
         attachmentResponses = append(attachmentResponses, AttachmentResponse{
             ID:            attachment.ID,
             Type:          attachment.Type,
             FileName:      attachment.FileName,
             FileSize:      attachment.FileSize,
-            FilePath:      attachment.FilePath,
+            FilePath:      fullFilePath,
             MimeType:      attachment.MimeType,
         })
     }
