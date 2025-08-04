@@ -34,7 +34,7 @@ RUN mkdir -p /app/uploads
 COPY ${LOCAL_RELAY_PATH:-nonexistent} /app/relay-server-local
 COPY --from=downloader /app/relay-server /app/relay-server-downloaded
 
-COPY <<EOF /app/entrypoint.sh
+RUN cat > /app/entrypoint.sh <<'EOF'
 #!/bin/sh
 set -e
 if [ -x /app/relay-server-local ]; then
