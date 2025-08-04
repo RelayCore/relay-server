@@ -257,8 +257,10 @@ func getUserFromAuth(r *http.Request) string {
     if auth != "" && strings.HasPrefix(auth, "Bearer ") {
         publicKeyB64 = strings.TrimPrefix(auth, "Bearer ")
     } else {
-        // Fallback to query parameter
-        publicKeyB64 = r.URL.Query().Get("public_key")
+        // Fallback to cookie
+        if cookie, err := r.Cookie("auth_token"); err == nil {
+            publicKeyB64 = cookie.Value
+        }
     }
 
     if publicKeyB64 == "" {
