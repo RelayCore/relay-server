@@ -109,7 +109,7 @@ func main() {
     authRoute(mux, "/server/metrics", middleware.GlobalRateLimit, Cache5Min, handlers.GetMetricsHandler)
 
     // Static file serving for uploads
-    mux.Handle("/uploads/", middleware.CacheControl(24*time.Hour, "public")(http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads/"))).ServeHTTP))
+    mux.Handle("/uploads/", middleware.CacheControl(24*time.Hour, "public")(middleware.SecureStaticFileServer("uploads").ServeHTTP))
     // Server icon endpoint
     publicRoute(mux, "/icon", middleware.GlobalRateLimit, Cache24Hour, handlers.GetServerIconHandler)
     // WebSocket endpoint
