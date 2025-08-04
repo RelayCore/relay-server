@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,21 +11,26 @@ import (
 )
 
 func GetFullURL(r *http.Request, path string) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-
-	if path != "" && path[0] != '/' {
-		path = "/" + path
-	}
-
-	host := r.Host
-    if config.Conf.Domain != "" {
-        host = config.Conf.Domain
+    scheme := "http"
+    if r.TLS != nil {
+        scheme = "https"
     }
 
-	return fmt.Sprintf("%s://%s%s", scheme, host, path)
+    if path != "" && path[0] != '/' {
+        path = "/" + path
+    }
+
+    host := r.Host
+    if config.Conf.Domain != "" {
+        _, port, err := net.SplitHostPort(r.Host)
+        if err == nil && port != "" {
+            host = fmt.Sprintf("%s:%s", config.Conf.Domain, port)
+        } else {
+            host = config.Conf.Domain
+        }
+    }
+
+    return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
 
 func GetProfilePictureURL(r *http.Request, userID string) string {
