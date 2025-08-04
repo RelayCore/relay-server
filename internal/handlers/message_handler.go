@@ -565,6 +565,20 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
 	// Reset file pointer
 	file.Seek(0, 0)
 
+	var existingAttachment channel.Attachment
+	if err := db.DB.Where("file_hash = ?", fileHash).First(&existingAttachment).Error; err == nil {
+		attachment := &channel.Attachment{
+			MessageID: messageID,
+			Type:      existingAttachment.Type,
+			FileName:  existingAttachment.FileName,
+			FileSize:  existingAttachment.FileSize,
+			FilePath:  existingAttachment.FilePath,
+			MimeType:  existingAttachment.MimeType,
+			FileHash:  existingAttachment.FileHash,
+		}
+		return attachment, nil
+	}
+
 	// Generate unique filename using hash and timestamp
 	ext := filepath.Ext(fileHeader.Filename)
 	timestamp := time.Now().Unix()
