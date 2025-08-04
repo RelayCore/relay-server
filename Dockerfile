@@ -49,6 +49,7 @@ chmod +x /app/relay-server
 exec /app/relay-server
 EOF
 
+RUN sed -i 's/\r$//' /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 36954
