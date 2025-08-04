@@ -12,8 +12,10 @@ import (
 
 func GetFullURL(r *http.Request, path string) string {
     scheme := "http"
+    defaultPort := "80"
     if r.TLS != nil {
         scheme = "https"
+        defaultPort = "443"
     }
 
     if path != "" && path[0] != '/' {
@@ -22,11 +24,18 @@ func GetFullURL(r *http.Request, path string) string {
 
     host := r.Host
     if config.Conf.Domain != "" {
+        domain := config.Conf.Domain
         _, port, err := net.SplitHostPort(r.Host)
-        if err == nil && port != "" {
-            host = fmt.Sprintf("%s:%s", config.Conf.Domain, port)
+        if err != nil || port == "" {
+            port = config.Conf.Port
+            if len(port) > 0 && port[0] == ':' {
+                port = port[1:]
+            }
+        }
+        if port != "" && port != defaultPort {
+            host = fmt.Sprintf("%s:%s", domain, port)
         } else {
-            host = config.Conf.Domain
+            host = domain
         }
     }
 
