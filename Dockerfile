@@ -1,16 +1,17 @@
-FROM alpine:latest
+FROM ubuntu:latest
 
 ARG RELAY_VERSION=latest
 ARG LOCAL_RELAY_PATH
 WORKDIR /app
 
-RUN apk add --no-cache curl tar unzip
+RUN apt-get update && apt-get install -y curl tar unzip && rm -rf /var/lib/apt/lists/*
 
 COPY config.yaml .
-COPY uploads/ ./uploads/
+RUN mkdir -p /app/uploads
 
-RUN if [ -n "$LOCAL_RELAY_PATH" ]; then \
-      cp "$LOCAL_RELAY_PATH" /app/relay-server && chmod +x /app/relay-server; \
+COPY ${LOCAL_RELAY_PATH:-nonexistent} /app/relay-server
+RUN if [ -f /app/relay-server ]; then \
+      chmod +x /app/relay-server; \
     else \
       if [ "$RELAY_VERSION" = "latest" ]; then \
         RELAY_VERSION=$(curl -s https://api.github.com/repos/RelayCore/relay-server/releases/latest | grep tag_name | cut -d '"' -f 4); \

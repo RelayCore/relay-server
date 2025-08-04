@@ -27,8 +27,7 @@ services:
         depends_on:
             - relay-server
         ports:
-            - "443:443"
-            - "80:80"
+            - "36954:36954"
         profiles: ["local"]
         volumes:
             - ./nginx/nginx.conf.local.template:/etc/nginx/nginx.conf:ro
@@ -40,8 +39,7 @@ services:
             - relay-server
         profiles: ["letsencrypt"]
         ports:
-            - "443:443"
-            - "80:80"
+            - "36954:36954"
         environment:
             - DOMAIN
         volumes:
@@ -56,8 +54,7 @@ services:
             - relay-server
         profiles: ["selfsigned"]
         ports:
-            - "443:443"
-            - "80:80"
+            - "36954:36954"
         environment:
             - DOMAIN
         volumes:
