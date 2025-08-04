@@ -22,21 +22,28 @@ func GetFullURL(r *http.Request, path string) string {
         path = "/" + path
     }
 
-    host := r.Host
+    var host string
+    var port string
+
     if config.Conf.Domain != "" {
-        domain := config.Conf.Domain
-        _, port, err := net.SplitHostPort(r.Host)
-        if err != nil || port == "" {
+        host = config.Conf.Domain
+        port = config.Conf.Port
+    } else {
+        host, port, _ = net.SplitHostPort(r.Host)
+        if host == "" {
+            host = r.Host
+        }
+        if port == "" {
             port = config.Conf.Port
-            if len(port) > 0 && port[0] == ':' {
-                port = port[1:]
-            }
         }
-        if port != "" && port != defaultPort {
-            host = fmt.Sprintf("%s:%s", domain, port)
-        } else {
-            host = domain
-        }
+    }
+
+    if len(port) > 0 && port[0] == ':' {
+        port = port[1:]
+    }
+
+    if port != "" && port != defaultPort {
+        host = fmt.Sprintf("%s:%s", host, port)
     }
 
     return fmt.Sprintf("%s://%s%s", scheme, host, path)
