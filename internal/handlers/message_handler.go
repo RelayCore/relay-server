@@ -652,10 +652,14 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
                 return nil, fmt.Errorf("failed to stat webp file: %v", err)
             }
 
+			origName := fileHeader.Filename
+			baseName := strings.TrimSuffix(origName, filepath.Ext(origName))
+			webpName := baseName + ".webp"
+
             attachment := &channel.Attachment{
                 MessageID: messageID,
                 Type:      channel.AttachmentTypeImage,
-                FileName:  fileHeader.Filename,
+                FileName:  webpName,
                 FileSize:  stat.Size(),
                 FilePath:  webpFilePath,
                 MimeType:  "image/webp",
