@@ -567,27 +567,11 @@ func (c *Client) writePump() {
 }
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		auth := r.Header.Get("Authorization")
-		if auth != "" && len(auth) > 7 && auth[:7] == "Bearer " {
-			userID = auth[7:]
-		}
-	}
-
-	if userID == "" {
-		http.Error(w, "User ID required", http.StatusBadRequest)
-		return
-	}
-
-	user.Mu.RLock()
-	_, exists := user.Users[userID]
-	user.Mu.RUnlock()
-
-	if !exists {
-		http.Error(w, "User not found", http.StatusUnauthorized)
-		return
-	}
+	userID, ok := r.Context().Value("user_id").(string)
+    if !ok || userID == "" {
+        http.Error(w, "Authentication required", http.StatusUnauthorized)
+        return
+    }
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
