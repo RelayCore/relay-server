@@ -5,6 +5,8 @@ http {
         listen 36954 ssl;
         server_name _;
 
+        client_max_body_size 1G;
+
         ssl_certificate     /etc/nginx/selfsigned/cert.pem;
         ssl_certificate_key /etc/nginx/selfsigned/key.pem;
 

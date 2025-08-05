@@ -5,6 +5,8 @@ http {
         listen 36954;
         server_name _;
 
+        client_max_body_size 1G;
+
         location /ws {
             proxy_pass         http://relay-server:36954;
             proxy_set_header   Host $host;
