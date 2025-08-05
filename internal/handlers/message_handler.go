@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"mime/multipart"
@@ -16,6 +18,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	_ "github.com/chai2010/webp"
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
 
 	"github.com/HugoSmits86/nativewebp"
 
@@ -595,42 +601,45 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
     }
     attachmentType := getAttachmentType(mimeType)
 
-    // If image (not gif), convert to webp
-    if attachmentType == channel.AttachmentTypeImage && !strings.EqualFold(ext, ".gif") {
+	convertibleFormats := map[string]bool{
+        "jpeg": true,
+        "png":  true,
+        "bmp":  true,
+        "tiff": true,
+    }
+
+    if attachmentType == channel.AttachmentTypeImage {
 		file.Seek(0, 0)
-        img, _, err := image.Decode(file)
-        if err != nil {
-            return nil, fmt.Errorf("failed to decode image: %v", err)
-        }
+        img, format, err := image.Decode(file)
+        if err == nil && convertibleFormats[format] {
+            webpFileName := fmt.Sprintf("%d_%s.webp", timestamp, fileHash[:16])
+            webpFilePath := filepath.Join(uploadsDir, webpFileName)
+            webpFile, err := os.Create(webpFilePath)
+            if err != nil {
+                return nil, fmt.Errorf("failed to create webp file: %v", err)
+            }
+            defer webpFile.Close()
 
-        webpFileName := fmt.Sprintf("%d_%s.webp", timestamp, fileHash[:16])
-        webpFilePath := filepath.Join(uploadsDir, webpFileName)
-        webpFile, err := os.Create(webpFilePath)
-        if err != nil {
-            return nil, fmt.Errorf("failed to create webp file: %v", err)
-        }
-        defer webpFile.Close()
+            if err := nativewebp.Encode(webpFile, img, nil); err != nil {
+                return nil, fmt.Errorf("failed to encode image to webp: %v", err)
+            }
 
-        if err := nativewebp.Encode(webpFile, img, nil); err != nil {
-            return nil, fmt.Errorf("failed to encode image to webp: %v", err)
-        }
+            stat, err := webpFile.Stat()
+            if err != nil {
+                return nil, fmt.Errorf("failed to stat webp file: %v", err)
+            }
 
-        // Get file size
-        stat, err := webpFile.Stat()
-        if err != nil {
-            return nil, fmt.Errorf("failed to stat webp file: %v", err)
+            attachment := &channel.Attachment{
+                MessageID: messageID,
+                Type:      channel.AttachmentTypeImage,
+                FileName:  fileHeader.Filename,
+                FileSize:  stat.Size(),
+                FilePath:  webpFilePath,
+                MimeType:  "image/webp",
+                FileHash:  fileHash,
+            }
+            return attachment, nil
         }
-
-        attachment := &channel.Attachment{
-            MessageID: messageID,
-            Type:      channel.AttachmentTypeImage,
-            FileName:  fileHeader.Filename,
-            FileSize:  stat.Size(),
-            FilePath:  webpFilePath,
-            MimeType:  "image/webp",
-            FileHash:  fileHash,
-        }
-        return attachment, nil
     }
 
     // Not an image or is a gif, just save as is
@@ -640,6 +649,7 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
     }
     defer dst.Close()
 
+	file.Seek(0, 0)
     if _, err := io.Copy(dst, file); err != nil {
         return nil, fmt.Errorf("failed to copy file: %v", err)
     }
