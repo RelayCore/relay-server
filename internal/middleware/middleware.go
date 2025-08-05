@@ -519,23 +519,3 @@ func NoCache(next http.HandlerFunc) http.HandlerFunc {
 func StaticCache(next http.HandlerFunc) http.HandlerFunc {
     return CacheControl(24*time.Hour, "public")(next)
 }
-
-func SecureStaticFileServer(dir string) http.Handler {
-    fs := http.FileServer(http.Dir(dir))
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if strings.HasSuffix(r.URL.Path, "/") {
-            http.NotFound(w, r)
-            return
-        }
-
-        if strings.Contains(r.URL.Path, "..") || strings.Contains(r.URL.Path, "%2e%2e") || strings.ContainsRune(r.URL.Path, 0) {
-            http.Error(w, "Invalid path", http.StatusBadRequest)
-            return
-        }
-
-        w.Header().Set("X-Content-Type-Options", "nosniff")
-        w.Header().Set("X-Frame-Options", "DENY")
-        w.Header().Set("Content-Disposition", "attachment")
-        fs.ServeHTTP(w, r)
-    })
-}
