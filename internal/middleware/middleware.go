@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -259,11 +260,18 @@ func getUserFromAuth(r *http.Request) string {
     } else {
         // Fallback to cookie
         if cookie, err := r.Cookie("auth_token"); err == nil {
-            publicKeyB64 = cookie.Value
+            // URL-decode the cookie value
+            decoded, err := url.QueryUnescape(cookie.Value)
+            if err == nil {
+                publicKeyB64 = decoded
+            } else {
+                publicKeyB64 = cookie.Value
+            }
         }
     }
 
     if publicKeyB64 == "" {
+        println("getUserFromAuth: No public key found in Authorization header or cookie")
         return ""
     }
 
