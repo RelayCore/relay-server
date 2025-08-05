@@ -712,16 +712,23 @@ func DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Delete associated attachments from filesystem and database
 	var attachments []channel.Attachment
-	if err := db.DB.Where("message_id = ?", messageID).Find(&attachments).Error; err == nil {
-		for _, attachment := range attachments {
-			// Delete file from filesystem
-			if err := os.Remove(attachment.FilePath); err != nil {
-				fmt.Printf("Warning: Failed to delete attachment file %s: %v\n", attachment.FilePath, err)
-			}
-		}
-		// Delete attachment records from database
-		db.DB.Where("message_id = ?", messageID).Delete(&channel.Attachment{})
-	}
+    if err := db.DB.Where("message_id = ?", messageID).Find(&attachments).Error; err == nil {
+        for _, attachment := range attachments {
+            // Check if any other attachment uses the same file_hash
+            var count int64
+            db.DB.Model(&channel.Attachment{}).
+                Where("file_hash = ? AND id != ?", attachment.FileHash, attachment.ID).
+                Count(&count)
+            if count == 0 {
+                // No other references, safe to delete file
+                if err := os.Remove(attachment.FilePath); err != nil {
+                    fmt.Printf("Warning: Failed to delete attachment file %s: %v\n", attachment.FilePath, err)
+                }
+            }
+        }
+        // Delete attachment records from database
+        db.DB.Where("message_id = ?", messageID).Delete(&channel.Attachment{})
+    }
 
 	// Delete the message from database
 	if err := db.DB.Delete(&message).Error; err != nil {
