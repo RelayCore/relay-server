@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"mime/multipart"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/HugoSmits86/nativewebp"
 
 	"relay-server/internal/channel"
 	"relay-server/internal/config"
@@ -537,87 +540,122 @@ func GetMessageRepliesHandler(w http.ResponseWriter, r *http.Request) {
 
 // processAttachment handles file upload and creates attachment record
 func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*channel.Attachment, error) {
-	// Open the uploaded file
-	file, err := fileHeader.Open()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %v", err)
-	}
-	defer file.Close()
+    // Open the uploaded file
+    file, err := fileHeader.Open()
+    if err != nil {
+        return nil, fmt.Errorf("failed to open file: %v", err)
+    }
+    defer file.Close()
 
-	// Validate file size
-	if fileHeader.Size > config.Conf.MaxFileSize {
-		return nil, fmt.Errorf("file too large (max %d bytes)", config.Conf.MaxFileSize)
-	}
+    // Validate file size
+    if fileHeader.Size > config.Conf.MaxFileSize {
+        return nil, fmt.Errorf("file too large (max %d bytes)", config.Conf.MaxFileSize)
+    }
 
-	// Create uploads directory if it doesn't exist
-	uploadsDir := "uploads/attachments"
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create uploads directory: %v", err)
-	}
+    // Create uploads directory if it doesn't exist
+    uploadsDir := "uploads/attachments"
+    if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+        return nil, fmt.Errorf("failed to create uploads directory: %v", err)
+    }
 
-	// Generate file hash for deduplication
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return nil, fmt.Errorf("failed to hash file: %v", err)
-	}
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
+    // Generate file hash for deduplication
+    hasher := sha256.New()
+    if _, err := io.Copy(hasher, file); err != nil {
+        return nil, fmt.Errorf("failed to hash file: %v", err)
+    }
+    fileHash := hex.EncodeToString(hasher.Sum(nil))
 
-	// Reset file pointer
-	file.Seek(0, 0)
+    // Reset file pointer
+    file.Seek(0, 0)
 
-	var existingAttachment channel.Attachment
-	if err := db.DB.Where("file_hash = ?", fileHash).First(&existingAttachment).Error; err == nil {
-		attachment := &channel.Attachment{
-			MessageID: messageID,
-			Type:      existingAttachment.Type,
-			FileName:  existingAttachment.FileName,
-			FileSize:  existingAttachment.FileSize,
-			FilePath:  existingAttachment.FilePath,
-			MimeType:  existingAttachment.MimeType,
-			FileHash:  existingAttachment.FileHash,
-		}
-		return attachment, nil
-	}
+    var existingAttachment channel.Attachment
+    if err := db.DB.Where("file_hash = ?", fileHash).First(&existingAttachment).Error; err == nil {
+        attachment := &channel.Attachment{
+            MessageID: messageID,
+            Type:      existingAttachment.Type,
+            FileName:  existingAttachment.FileName,
+            FileSize:  existingAttachment.FileSize,
+            FilePath:  existingAttachment.FilePath,
+            MimeType:  existingAttachment.MimeType,
+            FileHash:  existingAttachment.FileHash,
+        }
+        return attachment, nil
+    }
 
-	// Generate unique filename using hash and timestamp
-	ext := filepath.Ext(fileHeader.Filename)
-	timestamp := time.Now().Unix()
-	newFileName := fmt.Sprintf("%d_%s%s", timestamp, fileHash[:16], ext)
-	filePath := filepath.Join(uploadsDir, newFileName)
+    // Generate unique filename using hash and timestamp
+    ext := filepath.Ext(fileHeader.Filename)
+    timestamp := time.Now().Unix()
+    newFileName := fmt.Sprintf("%d_%s%s", timestamp, fileHash[:16], ext)
+    filePath := filepath.Join(uploadsDir, newFileName)
 
-	// Create the destination file
-	dst, err := os.Create(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create destination file: %v", err)
-	}
-	defer dst.Close()
+    // Determine attachment type from MIME type
+    mimeType := fileHeader.Header.Get("Content-Type")
+    if mimeType == "" {
+        mimeType = getMimeTypeFromExtension(ext)
+    }
+    attachmentType := getAttachmentType(mimeType)
 
-	// Copy file content
-	if _, err := io.Copy(dst, file); err != nil {
-		return nil, fmt.Errorf("failed to copy file: %v", err)
-	}
+    // If image (not gif), convert to webp
+    if attachmentType == channel.AttachmentTypeImage && !strings.EqualFold(ext, ".gif") {
+        img, _, err := image.Decode(file)
+        if err != nil {
+            return nil, fmt.Errorf("failed to decode image: %v", err)
+        }
+        // Reset file pointer for hashing again if needed
+        file.Seek(0, 0)
 
-	// Determine attachment type from MIME type
-	mimeType := fileHeader.Header.Get("Content-Type")
-	if mimeType == "" {
-		// Fallback to file extension detection
-		mimeType = getMimeTypeFromExtension(ext)
-	}
+        webpFileName := fmt.Sprintf("%d_%s.webp", timestamp, fileHash[:16])
+        webpFilePath := filepath.Join(uploadsDir, webpFileName)
+        webpFile, err := os.Create(webpFilePath)
+        if err != nil {
+            return nil, fmt.Errorf("failed to create webp file: %v", err)
+        }
+        defer webpFile.Close()
 
-	attachmentType := getAttachmentType(mimeType)
+        if err := nativewebp.Encode(webpFile, img, nil); err != nil {
+            return nil, fmt.Errorf("failed to encode image to webp: %v", err)
+        }
 
-	// Create attachment record
-	attachment := &channel.Attachment{
-		MessageID: messageID,
-		Type:      attachmentType,
-		FileName:  fileHeader.Filename,
-		FileSize:  fileHeader.Size,
-		FilePath:  filePath,
-		MimeType:  mimeType,
-		FileHash:  fileHash,
-	}
+        // Get file size
+        stat, err := webpFile.Stat()
+        if err != nil {
+            return nil, fmt.Errorf("failed to stat webp file: %v", err)
+        }
 
-	return attachment, nil
+        attachment := &channel.Attachment{
+            MessageID: messageID,
+            Type:      channel.AttachmentTypeImage,
+            FileName:  fileHeader.Filename,
+            FileSize:  stat.Size(),
+            FilePath:  webpFilePath,
+            MimeType:  "image/webp",
+            FileHash:  fileHash,
+        }
+        return attachment, nil
+    }
+
+    // Not an image or is a gif, just save as is
+    dst, err := os.Create(filePath)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create destination file: %v", err)
+    }
+    defer dst.Close()
+
+    if _, err := io.Copy(dst, file); err != nil {
+        return nil, fmt.Errorf("failed to copy file: %v", err)
+    }
+
+    attachment := &channel.Attachment{
+        MessageID: messageID,
+        Type:      attachmentType,
+        FileName:  fileHeader.Filename,
+        FileSize:  fileHeader.Size,
+        FilePath:  filePath,
+        MimeType:  mimeType,
+        FileHash:  fileHash,
+    }
+
+    return attachment, nil
 }
 
 func DeleteMessageHandler(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.24.4
 
 require (
+	github.com/HugoSmits86/nativewebp v1.2.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/pion/rtp v1.8.7
 	github.com/pion/webrtc/v3 v3.3.5
@@ -43,6 +44,7 @@ require (
 	github.com/wlynxg/anet v0.0.3 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
+	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
