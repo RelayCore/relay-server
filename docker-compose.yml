@@ -16,10 +16,10 @@ services:
     imageproxy:
         image: willnorris/imageproxy:latest
         restart: unless-stopped
-        environment:
-            - IMAGEPROXY_CACHE=/cache
-            - IMAGEPROXY_CACHE_SIZE=512 # MB, adjust as needed
-            - IMAGEPROXY_ADDR=0.0.0.0:8080
+        command:
+            - -addr=0.0.0.0:8080
+            - -cache=/cache
+            - -passRequestHeaders=Cookie
         volumes:
             - ./imageproxy-cache:/cache
         ports:
