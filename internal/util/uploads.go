@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"relay-server/internal/config"
 )
 
-func GetFullURL(r *http.Request, path string) string {
+func GetFullURL(r *http.Request, path string, resize ...string) string {
     scheme := "http"
     defaultPort := "80"
     if r.TLS != nil {
@@ -20,6 +21,14 @@ func GetFullURL(r *http.Request, path string) string {
 
     if path != "" && path[0] != '/' {
         path = "/" + path
+    }
+
+    if len(resize) > 0 && resize[0] != "" && strings.HasPrefix(path, "/uploads/") {
+        // /uploads/filename.jpg -> /uploads/{resize}/filename.jpg
+        parts := strings.SplitN(path, "/", 3)
+        if len(parts) == 3 {
+            path = fmt.Sprintf("/uploads/%s/%s", resize[0], parts[2])
+        }
     }
 
     var host string

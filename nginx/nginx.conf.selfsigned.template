@@ -10,6 +10,28 @@ http {
         ssl_certificate     /etc/nginx/selfsigned/cert.pem;
         ssl_certificate_key /etc/nginx/selfsigned/key.pem;
 
+        # Match /uploads/{size}/rest/of/path
+        location ~* ^/uploads/(?<size>[0-9]+x[0-9]+|[0-9]+x|x[0-9]+)/(?<imgpath>.*\.(jpg|jpeg|png|gif|webp|bmp|svg))$ {
+            proxy_pass         http://imageproxy:8080/$size/http://relay-server:36954/uploads/$imgpath;
+            proxy_set_header   Host $host;
+            proxy_set_header   X-Real-IP $remote_addr;
+            proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            proxy_set_header   Cookie $http_cookie;
+            proxy_http_version 1.1;
+        }
+
+        # Fallback for original images (no resize)
+        location ~* ^/uploads/.*\.(jpg|jpeg|png|gif|webp|bmp|svg)$ {
+            proxy_pass         http://imageproxy:8080/0x0/http://relay-server:36954$request_uri;
+            proxy_set_header   Host $host;
+            proxy_set_header   X-Real-IP $remote_addr;
+            proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            proxy_set_header   Cookie $http_cookie;
+            proxy_http_version 1.1;
+        }
+
         location /ws {
             proxy_pass         http://relay-server:36954;
             proxy_set_header   Host $host;

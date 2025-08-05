@@ -1411,7 +1411,7 @@ func GetAllAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
                     filePath = "/uploads/" + filePath
                 }
             }
-            filePath = util.GetFullURL(r, filePath)
+            filePath = util.GetFullURL(r, filePath, "250x")
         }
 
         attachmentResponses = append(attachmentResponses, AttachmentApiResponse{
