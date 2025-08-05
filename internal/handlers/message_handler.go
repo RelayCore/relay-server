@@ -597,12 +597,11 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
 
     // If image (not gif), convert to webp
     if attachmentType == channel.AttachmentTypeImage && !strings.EqualFold(ext, ".gif") {
+		file.Seek(0, 0)
         img, _, err := image.Decode(file)
         if err != nil {
             return nil, fmt.Errorf("failed to decode image: %v", err)
         }
-        // Reset file pointer for hashing again if needed
-        file.Seek(0, 0)
 
         webpFileName := fmt.Sprintf("%d_%s.webp", timestamp, fileHash[:16])
         webpFilePath := filepath.Join(uploadsDir, webpFileName)
