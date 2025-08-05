@@ -115,7 +115,7 @@ func main() {
     // Server icon endpoint
     publicRoute(mux, "/icon", middleware.GlobalRateLimit, Cache24Hour, handlers.GetServerIconHandler)
     // WebSocket endpoint
-    mux.HandleFunc("/ws", middleware.RequireAuth(websocket.HandleWebSocket))
+    mux.HandleFunc("/ws", websocket.HandleWebSocket)
 
     // User management endpoints - viewing users should be accessible to all
     authRoute(mux, "/users", middleware.GlobalRateLimit, Cache2Min, handlers.GetUsersHandler)
