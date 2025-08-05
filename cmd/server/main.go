@@ -110,7 +110,7 @@ func main() {
 
     // Static file serving for uploads
     mux.Handle("/uploads/", middleware.CacheControl(24*time.Hour, "public")(
-        middleware.RequireAuth(middleware.SecureStaticFileServer("uploads").ServeHTTP),
+        middleware.SecureStaticFileServer("uploads").ServeHTTP,
     ))
     // Server icon endpoint
     publicRoute(mux, "/icon", middleware.GlobalRateLimit, Cache24Hour, handlers.GetServerIconHandler)
