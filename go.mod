@@ -6,7 +6,6 @@ toolchain go1.24.4
 
 require (
 	github.com/HugoSmits86/nativewebp v1.2.0
-	github.com/chai2010/webp v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/pion/rtp v1.8.7
 	github.com/pion/webrtc/v3 v3.3.5
