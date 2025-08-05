@@ -14,7 +14,7 @@ services:
             - "36954"
 
     imageproxy:
-        image: willnorris/imageproxy:latest
+        image: ghcr.io/willnorris/imageproxy
         restart: unless-stopped
         command:
             - -addr=0.0.0.0:8080
