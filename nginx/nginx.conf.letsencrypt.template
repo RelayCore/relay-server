@@ -1,6 +1,8 @@
 events {}
 
 http {
+    resolver 127.0.0.11 ipv6=off;
+
     server {
         listen 36954;
         server_name ${DOMAIN};
