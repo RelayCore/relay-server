@@ -13,6 +13,7 @@ type ServerConfig struct {
 	AllowInvite    bool   `yaml:"allow_invite"`
 	MaxUsers       int    `yaml:"max_users"`
 	MaxFileSize    int64  `yaml:"max_file_size"`
+	MaxImageSize   int    `yaml:"max_image_size,omitempty"`
 	MaxAttachments int    `yaml:"max_attachments"`
 	Icon           string `yaml:"icon,omitempty"`
 	Port           string `yaml:"port,omitempty"`
@@ -30,6 +31,7 @@ func CreateDefaultConfig(path string) error {
 		AllowInvite:    true,
 		MaxUsers:       100,
 		MaxFileSize:    52428800,
+		MaxImageSize:   2000,
 		MaxAttachments: 10,
 		Icon:           "",
 		Port:           ":36954",
@@ -63,17 +65,18 @@ func LoadConfig(path string) {
 	yaml.Unmarshal(f, &Conf)
 	log.Printf("Loaded config: %+v", Conf)
 
-	// Set default max file size if not specified (50MB)
 	if Conf.MaxFileSize == 0 {
 		Conf.MaxFileSize = 52428800
 	}
 
-	// Set default max attachments if not specified
+	if Conf.MaxImageSize == 0 {
+        Conf.MaxImageSize = 2000
+    }
+
 	if Conf.MaxAttachments == 0 {
 		Conf.MaxAttachments = 10
 	}
 
-	// Set default port if not specified
 	if Conf.Port == "" {
 		Conf.Port = ":36954"
 	}

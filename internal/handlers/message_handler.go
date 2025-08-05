@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/image/draw"
+
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
 
@@ -543,6 +545,26 @@ func GetMessageRepliesHandler(w http.ResponseWriter, r *http.Request) {
     })
 }
 
+func resizeImageIfNeeded(img image.Image, maxSize int) image.Image {
+    bounds := img.Bounds()
+    width := bounds.Dx()
+    height := bounds.Dy()
+    if width <= maxSize && height <= maxSize {
+        return img
+    }
+    var newW, newH int
+    if width > height {
+        newW = maxSize
+        newH = int(float64(height) * float64(maxSize) / float64(width))
+    } else {
+        newH = maxSize
+        newW = int(float64(width) * float64(maxSize) / float64(height))
+    }
+    dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+    draw.CatmullRom.Scale(dst, dst.Bounds(), img, bounds, draw.Over, nil)
+    return dst
+}
+
 // processAttachment handles file upload and creates attachment record
 func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*channel.Attachment, error) {
     // Open the uploaded file
@@ -611,6 +633,8 @@ func processAttachment(fileHeader *multipart.FileHeader, messageID uint) (*chann
 		file.Seek(0, 0)
         img, format, err := image.Decode(file)
         if err == nil && convertibleFormats[format] {
+			img = resizeImageIfNeeded(img, config.Conf.MaxImageSize)
+
             webpFileName := fmt.Sprintf("%d_%s.webp", timestamp, fileHash[:16])
             webpFilePath := filepath.Join(uploadsDir, webpFileName)
             webpFile, err := os.Create(webpFilePath)
