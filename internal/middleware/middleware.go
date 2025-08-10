@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-chi/httprate"
+
 	"relay-server/internal/user"
 )
 
@@ -340,155 +342,53 @@ func (rl *RateLimiter) Allow() bool {
     return false
 }
 
-// RateLimitStore manages rate limiters for different keys (IP addresses, user IDs, etc.)
-type RateLimitStore struct {
-    limiters map[string]*RateLimiter
-    mutex    sync.RWMutex
-    capacity int
-    refillRate time.Duration
-    cleanup  time.Duration
-}
-
-// NewRateLimitStore creates a new rate limit store
-func NewRateLimitStore(capacity int, refillRate time.Duration) *RateLimitStore {
-    store := &RateLimitStore{
-        limiters:   make(map[string]*RateLimiter),
-        capacity:   capacity,
-        refillRate: refillRate,
-        cleanup:    time.Minute * 10, // Clean up old limiters every 10 minutes
-    }
-
-    // Start cleanup goroutine
-    go store.cleanupRoutine()
-
-    return store
-}
-
-// GetLimiter gets or creates a rate limiter for a key
-func (rls *RateLimitStore) GetLimiter(key string) *RateLimiter {
-    rls.mutex.RLock()
-    limiter, exists := rls.limiters[key]
-    rls.mutex.RUnlock()
-
-    if exists {
-        return limiter
-    }
-
-    rls.mutex.Lock()
-    defer rls.mutex.Unlock()
-
-    // Double-check after acquiring write lock
-    if limiter, exists := rls.limiters[key]; exists {
-        return limiter
-    }
-
-    // Create new limiter
-    limiter = NewRateLimiter(rls.capacity, rls.refillRate)
-    rls.limiters[key] = limiter
-    return limiter
-}
-
-// cleanupRoutine removes old, unused rate limiters
-func (rls *RateLimitStore) cleanupRoutine() {
-    ticker := time.NewTicker(rls.cleanup)
-    defer ticker.Stop()
-
-    for range ticker.C {
-        rls.mutex.Lock()
-        now := time.Now()
-        for key, limiter := range rls.limiters {
-            limiter.mutex.Lock()
-            // Remove limiters that haven't been used for more than the cleanup interval
-            if now.Sub(limiter.lastRefill) > rls.cleanup {
-                delete(rls.limiters, key)
-            }
-            limiter.mutex.Unlock()
-        }
-        rls.mutex.Unlock()
-    }
-}
-
 // Global rate limit stores for different types of limits
 var (
-    GlobalRateLimit = NewRateLimitStore(100, time.Minute/100)
-    MessageRateLimit = NewRateLimitStore(10, time.Minute/10)
-    AuthRateLimit = NewRateLimitStore(5, time.Minute/5)
-    InviteRateLimit = NewRateLimitStore(3, time.Minute/10)
+    GlobalRateLimit = httprate.Limit(
+        100, time.Minute * 10,
+        httprate.WithKeyFuncs(KeyByUserOrIP),
+        httprate.WithResponseHeaders(httprate.ResponseHeaders{
+            Limit:      "X-RateLimit-Limit",
+            Remaining:  "X-RateLimit-Remaining",
+            RetryAfter: "Retry-After",
+        }),
+    )
+    MessageRateLimit = httprate.Limit(
+        10, time.Minute/10,
+        httprate.WithKeyFuncs(KeyByUserOrIP),
+        httprate.WithResponseHeaders(httprate.ResponseHeaders{
+            Limit:      "X-RateLimit-Limit",
+            Remaining:  "X-RateLimit-Remaining",
+            RetryAfter: "Retry-After",
+        }),
+    )
+    AuthRateLimit = httprate.Limit(
+        5, time.Minute/5,
+        httprate.WithKeyFuncs(KeyByUserOrIP),
+        httprate.WithResponseHeaders(httprate.ResponseHeaders{
+            Limit:      "X-RateLimit-Limit",
+            Remaining:  "X-RateLimit-Remaining",
+            RetryAfter: "Retry-After",
+        }),
+    )
+    InviteRateLimit = httprate.Limit(
+        3, time.Minute/10,
+        httprate.WithKeyFuncs(KeyByUserOrIP),
+        httprate.WithResponseHeaders(httprate.ResponseHeaders{
+            Limit:      "X-RateLimit-Limit",
+            Remaining:  "X-RateLimit-Remaining",
+            RetryAfter: "Retry-After",
+        }),
+    )
 )
 
-// getClientKey extracts a client identifier from the request (IP or user ID)
-func getClientKey(r *http.Request, useUser bool) string {
-    if useUser {
-        if userID := getUserFromAuth(r); userID != "" {
-            return "user:" + userID
-        }
+func KeyByUserOrIP(r *http.Request) (string, error) {
+    userID := getUserFromAuth(r)
+    if userID != "" {
+        return "user:" + userID, nil
     }
-
-    // Fallback to IP address
-    ip := r.Header.Get("X-Forwarded-For")
-    if ip == "" {
-        ip = r.Header.Get("X-Real-IP")
-    }
-    if ip == "" {
-        ip = r.RemoteAddr
-    }
-    return "ip:" + ip
-}
-
-// RateLimit middleware factory for general rate limiting
-func RateLimit(store *RateLimitStore, useUser bool) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            key := getClientKey(r, useUser)
-            limiter := store.GetLimiter(key)
-
-            if !limiter.Allow() {
-                w.Header().Set("X-RateLimit-Limit", strconv.Itoa(store.capacity))
-                w.Header().Set("X-RateLimit-Remaining", "0")
-                w.Header().Set("Retry-After", fmt.Sprintf("%.0f", store.refillRate.Seconds()))
-                http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-                return
-            }
-
-            // Add rate limit headers
-            limiter.mutex.Lock()
-            remaining := limiter.tokens
-            limiter.mutex.Unlock()
-
-            w.Header().Set("X-RateLimit-Limit", strconv.Itoa(store.capacity))
-            w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-
-            next.ServeHTTP(w, r)
-        })
-    }
-}
-
-// RateLimitFunc middleware factory for handler functions
-func RateLimitFunc(store *RateLimitStore, useUser bool) func(http.HandlerFunc) http.HandlerFunc {
-    return func(next http.HandlerFunc) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-            key := getClientKey(r, useUser)
-            limiter := store.GetLimiter(key)
-
-            if !limiter.Allow() {
-                w.Header().Set("X-RateLimit-Limit", strconv.Itoa(store.capacity))
-                w.Header().Set("X-RateLimit-Remaining", "0")
-                w.Header().Set("Retry-After", fmt.Sprintf("%.0f", store.refillRate.Seconds()))
-                http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-                return
-            }
-
-            // Add rate limit headers
-            limiter.mutex.Lock()
-            remaining := limiter.tokens
-            limiter.mutex.Unlock()
-
-            w.Header().Set("X-RateLimit-Limit", strconv.Itoa(store.capacity))
-            w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-
-            next.ServeHTTP(w, r)
-        }
-    }
+    ip := GetClientIP(r)
+    return "ip:" + ip, nil
 }
 
 func CacheControl(maxAge time.Duration, cacheType string) func(http.HandlerFunc) http.HandlerFunc {

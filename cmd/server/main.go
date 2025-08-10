@@ -37,18 +37,18 @@ var (
 )
 
 // Fully public
-func publicRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, false)(cacheMiddleware(middleware.TrackOutboundData(handler))))
+func publicRoute(mux *http.ServeMux, path string, rateLimit func(http.Handler) http.Handler, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
+    mux.Handle(path, rateLimit(cacheMiddleware(middleware.TrackOutboundData(handler))))
 }
 
 // Require bearer token authentication
-func authRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequireAuth(middleware.TrackOutboundData(handler)))))
+func authRoute(mux *http.ServeMux, path string, rateLimit func(http.Handler) http.Handler, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
+    mux.Handle(path, rateLimit(cacheMiddleware(middleware.RequireAuth(middleware.TrackOutboundData(handler)))))
 }
 
 // Require specific user permissions and bearer token authentication
-func permissionRoute(mux *http.ServeMux, path string, rateLimit *middleware.RateLimitStore, permission user.Permission, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
-    mux.HandleFunc(path, middleware.RateLimitFunc(rateLimit, true)(cacheMiddleware(middleware.RequirePermission(permission)(middleware.TrackOutboundData(handler)))))
+func permissionRoute(mux *http.ServeMux, path string, rateLimit func(http.Handler) http.Handler, permission user.Permission, cacheMiddleware func(http.HandlerFunc) http.HandlerFunc, handler http.HandlerFunc) {
+    mux.Handle(path, rateLimit(cacheMiddleware(middleware.RequirePermission(permission)(middleware.TrackOutboundData(handler)))))
 }
 
 func main() {
@@ -113,7 +113,7 @@ func main() {
         middleware.RequireAuth(http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads/"))).ServeHTTP),
     ))
     // Server icon endpoint
-    publicRoute(mux, "/icon", middleware.GlobalRateLimit, Cache24Hour, handlers.GetServerIconHandler)
+    authRoute(mux, "/icon", middleware.GlobalRateLimit, Cache24Hour, handlers.GetServerIconHandler)
     // WebSocket endpoint
     mux.HandleFunc("/ws", middleware.RequireAuth(websocket.HandleWebSocket))
 
